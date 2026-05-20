@@ -9,6 +9,8 @@ export { readProject, scanProjects, detectProjectType } from './project.js'
 export { readProjectTasks, progressToState } from './task.js'
 export { readAgent, discoverAgents } from './agent.js'
 export { readLogbook, appendLogbook } from './logbook.js'
+export { updateProjectStatus } from './update.js'
+export type { ProjectStatusUpdate } from './update.js'
 export type * from './types.js'
 
 export async function scanVault(config: TavernaConfig): Promise<VaultState> {

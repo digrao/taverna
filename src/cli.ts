@@ -4,8 +4,9 @@ import { join } from 'node:path'
 import { morning } from './morning/index.js'
 import { defineConfig } from './config.js'
 import { storeAssets, pullAssets, statusAssets } from './assets/index.js'
-import { scanVault } from './vault/index.js'
+import { scanVault, appendLogbook, updateProjectStatus } from './vault/index.js'
 import { runAgent } from './pm/executor.js'
+import { processInbox, MAX_CHARS_PER_RUN } from './inbox/index.js'
 
 function getVaultPath(opts: { vault?: string }): string {
   const vaultPath = opts.vault ?? process.env['VAULT_PATH']
@@ -150,6 +151,24 @@ program
       if (opts.dryRun) {
         console.log(result.output)
       } else {
+        const lastStatus = result.success ? 'success' : 'failed'
+        const now = new Date().toISOString()
+        await updateProjectStatus(project.filePath, {
+          lastRun: now,
+          lastStatus,
+          runsTotal: project.runsTotal + 1,
+        })
+        await appendLogbook(agent.id, {
+          projectName: project.id,
+          content: [
+            `**Success:** ${result.success}`,
+            `**Duration:** ${(result.durationMs / 1000).toFixed(1)}s`,
+            ...(result.resultado ? [`**Resultado:** ${result.resultado}`] : []),
+            ...(result.error ? [`**Error:** ${result.error}`] : []),
+          ].join('\n'),
+          success: result.success,
+          duration: result.durationMs / 1000,
+        }, config)
         console.log(result.success ? `  done (${result.durationMs}ms)` : `  failed: ${result.error}`)
         if (result.resultado) console.log(`  RESULTADO: ${result.resultado}`)
       }
@@ -197,8 +216,61 @@ program
       }
       console.log(`\n${project.id} → ${agent.id}`)
       const result = await runAgent(agent, project, { ...(opts.dryRun ? { dryRun: true as const } : {}) })
-      console.log(result.success ? `  done (${result.durationMs}ms)` : `  failed: ${result.error}`)
-      if (result.resultado) console.log(`  RESULTADO: ${result.resultado}`)
+      if (!opts.dryRun) {
+        const lastStatus = result.success ? 'success' : 'failed'
+        const now = new Date().toISOString()
+        await updateProjectStatus(project.filePath, {
+          lastRun: now,
+          lastStatus,
+          runsTotal: project.runsTotal + 1,
+        })
+        await appendLogbook(agent.id, {
+          projectName: project.id,
+          content: [
+            `**Success:** ${result.success}`,
+            `**Duration:** ${(result.durationMs / 1000).toFixed(1)}s`,
+            ...(result.resultado ? [`**Resultado:** ${result.resultado}`] : []),
+            ...(result.error ? [`**Error:** ${result.error}`] : []),
+          ].join('\n'),
+          success: result.success,
+          duration: result.durationMs / 1000,
+        }, config)
+      }
+      if (opts.dryRun) {
+        console.log(result.output)
+      } else {
+        console.log(result.success ? `  done (${result.durationMs}ms)` : `  failed: ${result.error}`)
+        if (result.resultado) console.log(`  RESULTADO: ${result.resultado}`)
+      }
+    }
+  })
+
+// ── inbox ─────────────────────────────────────────────────────────────────────
+
+program
+  .command('inbox')
+  .description('Process 00_Inbox: cluster ideas and move to 40_Archives/projetos-incompletos')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .option('--dry-run', 'Print prompt without processing')
+  .option('--max-chars <n>', `Max inbox chars per run (default: ${MAX_CHARS_PER_RUN})`)
+  .action(async (opts: { vault?: string; dryRun?: boolean; maxChars?: string }) => {
+    const vaultPath = getVaultPath(opts)
+    const config = defineConfig({ vaultPath })
+    const maxChars = opts.maxChars ? Number(opts.maxChars) : undefined
+
+    const result = await processInbox(config, {
+      dryRun: opts.dryRun ?? false,
+      ...(maxChars !== undefined ? { maxChars } : {}),
+    })
+
+    if (result.processed === 0 && result.skipped === 0 && !opts.dryRun) {
+      console.log('Inbox empty — nothing to process.')
+      return
+    }
+    if (!opts.dryRun) {
+      console.log(`  processed: ${result.processed}`)
+      if (result.skipped > 0) console.log(`  deferred:  ${result.skipped} (over char limit, next run)`)
+      for (const e of result.errors) console.error(`  error   ${e.file}: ${e.error}`)
     }
   })
 

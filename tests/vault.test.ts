@@ -20,8 +20,10 @@ import {
   filterByAgent,
   getPendingTasks,
 } from '../src/vault/index.js'
+import { updateProjectStatus } from '../src/vault/update.js'
 import type { VaultProject, Priority } from '../src/vault/types.js'
 import { defineConfig } from '../src/config.js'
+import { readFileSync } from 'node:fs'
 
 // ── Test fixture helpers ──────────────────────────────────────────────────────
 
@@ -592,5 +594,61 @@ describe('scanVault (end-to-end fixture)', () => {
 
     const meta = state.projects.find(p => p.id === 'mytool')!
     expect(meta.tipo).toBe('*')
+  })
+})
+
+// ── updateProjectStatus ───────────────────────────────────────────────────────
+
+describe('updateProjectStatus', () => {
+  it('writes _last_run, _last_status and _runs_total into the file', async () => {
+    const filePath = write('10_Projects/PROJ/PROJ.md',
+      '---\nid: PROJ\nagent: "@study-assistant"\nrun_every: daily\n---\n# Content\n')
+
+    await updateProjectStatus(filePath, {
+      lastRun: '2026-05-20T14:00:00.000Z',
+      lastStatus: 'success',
+      runsTotal: 1,
+    })
+
+    const raw = readFileSync(filePath, 'utf8')
+    const { data } = parseFrontmatter(raw)
+    expect(data['_last_run']).toBe('2026-05-20T14:00:00.000Z')
+    expect(data['_last_status']).toBe('success')
+    expect(data['_runs_total']).toBe(1)
+  })
+
+  it('preserves existing frontmatter fields', async () => {
+    const filePath = write('10_Projects/PROJ2/PROJ2.md',
+      '---\nid: PROJ2\npriority: high\nagent: "@planner"\n---\n# Body\n')
+
+    await updateProjectStatus(filePath, {
+      lastRun: '2026-05-20T15:00:00.000Z',
+      lastStatus: 'failed',
+      runsTotal: 3,
+    })
+
+    const raw = readFileSync(filePath, 'utf8')
+    const { data, content } = parseFrontmatter(raw)
+    expect(data['id']).toBe('PROJ2')
+    expect(data['priority']).toBe('high')
+    expect(data['agent']).toBe('@planner')
+    expect(data['_last_status']).toBe('failed')
+    expect(data['_runs_total']).toBe(3)
+    expect(content.trim()).toBe('# Body')
+  })
+
+  it('increments runs_total on successive calls', async () => {
+    const filePath = write('10_Projects/PROJ3/PROJ3.md',
+      '---\nid: PROJ3\n_runs_total: 5\n---\n')
+
+    await updateProjectStatus(filePath, {
+      lastRun: new Date().toISOString(),
+      lastStatus: 'success',
+      runsTotal: 6,
+    })
+
+    const raw = readFileSync(filePath, 'utf8')
+    const { data } = parseFrontmatter(raw)
+    expect(data['_runs_total']).toBe(6)
   })
 })
