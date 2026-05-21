@@ -7,6 +7,7 @@ import { storeAssets, pullAssets, statusAssets } from './assets/index.js'
 import { scanVault, appendLogbook, updateProjectStatus } from './vault/index.js'
 import { runAgent } from './pm/executor.js'
 import { processInbox, MAX_CHARS_PER_RUN } from './inbox/index.js'
+import { migrate } from './migrate/index.js'
 
 function getVaultPath(opts: { vault?: string }): string {
   const vaultPath = opts.vault ?? process.env['VAULT_PATH']
@@ -272,6 +273,48 @@ program
       if (result.skipped > 0) console.log(`  deferred:  ${result.skipped} (over char limit, next run)`)
       for (const e of result.errors) console.error(`  error   ${e.file}: ${e.error}`)
     }
+  })
+
+// ── migrate ───────────────────────────────────────────────────────────────────
+
+program
+  .command('migrate <archive-path>')
+  .description('Promote an archived project to 10_Projects using Claude Code to synthesize notes')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .option('--id <id>', 'Override the project ID (default: folder name)')
+  .option('--no-tasks', 'Skip task extraction — create only the project file')
+  .option('--dry-run', 'Print the Claude prompt without running or writing anything')
+  .action(async (archivePath: string, opts: { vault?: string; id?: string; tasks?: boolean; dryRun?: boolean }) => {
+    const vaultPath = getVaultPath(opts)
+    const config = defineConfig({ vaultPath })
+    const projectsDir = join(vaultPath, config.projectsDir)
+
+    // Resolve archive path: absolute or relative to vault
+    const resolvedArchive = archivePath.startsWith('/')
+      ? archivePath
+      : join(vaultPath, archivePath)
+
+    console.log(`Scanning: ${resolvedArchive}`)
+
+    const { result, prompt } = await migrate(resolvedArchive, projectsDir, {
+      dryRun: opts.dryRun ?? false,
+      ...(opts.tasks === false ? { noTasks: true } : {}),
+      ...(opts.id !== undefined ? { overrideId: opts.id } : {}),
+    })
+
+    if (opts.dryRun) {
+      console.log('\n── Claude prompt that would be sent ──\n')
+      console.log(prompt)
+      console.log('\n── Would create ──')
+      console.log(`  project  ${result.projectPath}`)
+      return
+    }
+
+    console.log(`  created  ${result.projectPath}`)
+    for (const t of result.tasksCreated) {
+      console.log(`  task     ${t.replace(vaultPath + '/', '')}`)
+    }
+    console.log(`\nDone. ${result.tasksCreated.length} task(s) created.`)
   })
 
 program.parse()
