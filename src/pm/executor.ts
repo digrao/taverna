@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import type { VaultAgent, VaultProject } from '../vault/types.js'
 import { buildPrompt } from './prompt.js'
+import { log } from './loki.js'
 
 export interface ExecutorOptions {
   maxContextChars?: number
@@ -79,11 +80,17 @@ export async function runAgent(
     return { success: true, output: prompt, durationMs: 0 }
   }
 
+  const agentLabel = agent.id
+  const projectLabel = project.id
+
+  log({ event: 'agent_start', project: projectLabel, agent: agentLabel })
+
   const start = Date.now()
   try {
     const output = await spawnClaude(prompt, permissionMode, timeoutMs, allowedTools)
     const durationMs = Date.now() - start
     const resultado = parseResultado(output)
+    log({ event: 'agent_run', project: projectLabel, agent: agentLabel, status: 'success', duration_s: Math.round(durationMs / 100) / 10 })
     return {
       success: true,
       output,
@@ -91,10 +98,12 @@ export async function runAgent(
       ...(resultado !== undefined ? { resultado } : {}),
     }
   } catch (e) {
+    const durationMs = Date.now() - start
+    log({ event: 'agent_run', project: projectLabel, agent: agentLabel, status: 'failed', duration_s: Math.round(durationMs / 100) / 10 })
     return {
       success: false,
       output: '',
-      durationMs: Date.now() - start,
+      durationMs,
       error: String(e),
     }
   }

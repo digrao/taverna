@@ -122,7 +122,8 @@ program
   .option('--project <id>', 'Project ID (required when agent is omitted)')
   .option('--dry-run', 'Print the prompt without executing')
   .option('--max-chars <n>', 'Max context chars', '8000')
-  .action(async (agentId: string | undefined, opts: { vault?: string; project?: string; dryRun?: boolean; maxChars?: string }) => {
+  .option('--timeout <ms>', 'Agent timeout in ms', '600000')
+  .action(async (agentId: string | undefined, opts: { vault?: string; project?: string; dryRun?: boolean; maxChars?: string; timeout?: string }) => {
     const vaultPath = getVaultPath(opts)
     const config = defineConfig({ vaultPath })
     const vault = await scanVault(config)
@@ -164,6 +165,7 @@ program
       const result = await runAgent(agent, project, {
         ...(opts.dryRun ? { dryRun: true as const } : {}),
         ...(opts.maxChars ? { maxContextChars: Number(opts.maxChars) } : {}),
+        ...(opts.timeout ? { timeoutMs: Number(opts.timeout) } : {}),
       })
       if (opts.dryRun) {
         console.log(result.output)

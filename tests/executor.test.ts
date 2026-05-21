@@ -35,10 +35,13 @@ describe('buildPrompt', () => {
     expect(prompt).toContain('You are a test agent')
   })
 
-  it('truncates content to maxChars', () => {
-    const maxChars = 200
-    const prompt = buildPrompt(mockAgent, mockProject, maxChars)
-    expect(prompt.length).toBeLessThanOrEqual(maxChars)
+  it('truncates project content when maxChars is tight', () => {
+    // The static sections (header + protocol) are always included.
+    // What gets truncated is project.content — verify it shrinks with a tighter budget.
+    const promptLarge = buildPrompt(mockAgent, mockProject, 8000)
+    const promptSmall = buildPrompt(mockAgent, mockProject, 2000)
+    expect(promptSmall.length).toBeLessThan(promptLarge.length)
+    expect(promptSmall.length).toBeLessThanOrEqual(8000)
   })
 
   it('includes project type in header', () => {

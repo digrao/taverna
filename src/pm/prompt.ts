@@ -3,7 +3,6 @@ import type { VaultProject, VaultAgent, VaultTask } from '../vault/types.js'
 const PRIORITY_ICON: Record<string, string> = { high: '⬆', medium: '·', low: '⬇' }
 
 // Resolves "jvcm@start:some/path" → "/home/jvcm/some/path"
-// Resolves "user@host:path" → "/home/user/path" (generic form)
 export function resolveTarget(raw: string): string {
   const m = raw.match(/^(\w+)@\w+:(.+)$/)
   if (m) return `/home/${m[1]}/${m[2]}`
@@ -12,10 +11,39 @@ export function resolveTarget(raw: string): string {
 
 function renderTask(t: VaultTask): string {
   const icon = PRIORITY_ICON[t.prioridade] ?? '·'
-  const lines = [`### ${icon} ${t.id} (${t.progresso}%)`]
+  const lines = [
+    `### ${icon} ${t.id} (${t.progresso}%)`,
+    `_file: ${t.filePath}_`,
+  ]
   if (t.body) lines.push('', t.body)
   return lines.join('\n')
 }
+
+const COMPLETION_PROTOCOL = `\
+## Task Completion Protocol
+
+This applies to every agent after finishing work on a task:
+
+1. **Update task file** — set \`progresso:\` to \`100\` (done) or an intermediate value (partial).
+   Edit the frontmatter of the task file shown in \`_file: <path>_\` above.
+
+2. **Archive if done** — if \`progresso: 100\`, move the file:
+   \`mv tasks/<id>.md tasks/archive/<id>.md\`
+
+3. **Logbook** — append an entry to the project's \`logbook.md\` in the vault project folder
+   (NOT in the code repo). The vault project folder is the parent of the \`tasks/\` directory.
+
+   \`\`\`markdown
+   ## YYYY-MM-DD HH:MM — <task-id>
+   - Status: CONCLUÍDA | BLOQUEADA | PARCIAL
+   - Arquivos: <list>
+   - Testes: N passed (0 failed)
+   - Próximo: <next task or manual action needed>
+   \`\`\`
+
+4. **RESULTADO line** — always end your response with:
+   \`RESULTADO: <summary of what was done>\`
+`
 
 export function buildPrompt(agent: VaultAgent, project: VaultProject, maxChars: number): string {
   const rawTarget = typeof project.raw['target'] === 'string' ? project.raw['target'] : undefined
@@ -23,7 +51,6 @@ export function buildPrompt(agent: VaultAgent, project: VaultProject, maxChars: 
 
   const pending = project.tasks.filter(t => t.progresso < 100)
 
-  // Build the static sections first to know how much budget remains
   const meta = [
     '# Agent Task',
     '',
@@ -36,13 +63,14 @@ export function buildPrompt(agent: VaultAgent, project: VaultProject, maxChars: 
     '',
     agent.directiveText,
     '',
+    COMPLETION_PROTOCOL,
+    '',
   ].join('\n')
 
-  // Reserve at least 800 chars for project context
+  // Reserve space for project context
   const CONTEXT_RESERVE = 800
   let taskBudget = maxChars - meta.length - CONTEXT_RESERVE
 
-  // Include pending tasks from the top, stopping when the budget runs out
   const includedTasks: string[] = []
   let omitted = 0
   for (const t of pending) {
