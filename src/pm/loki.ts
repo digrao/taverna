@@ -1,4 +1,5 @@
-export type LogEvent = 'agent_run'
+import { emitEvent } from './event-bus.js'
+
 export type LogStatus = 'success' | 'failed'
 
 export interface AgentRunPayload {
@@ -11,10 +12,11 @@ export interface AgentRunPayload {
   tokens_out?: number
   cache_read?: number
   cache_fill?: number
+  cost_usd?: number
+  cache_hit_pct?: number
+  [key: string]: unknown
 }
 
-type LogPayload = AgentRunPayload
-
-export function log(payload: LogPayload): void {
-  process.stdout.write(JSON.stringify({ ts: new Date().toISOString(), ...payload }) + '\n')
+export function log(payload: AgentRunPayload): void {
+  emitEvent(payload)
 }

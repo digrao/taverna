@@ -193,10 +193,19 @@ export async function runAgent(
     if (pendingTaskPaths.length > 0) {
       await updateCompletedTaskSessionId(pendingTaskPaths, sessionId)
     }
+    // Sonnet 4.6 pricing: $3/MTok in, $15/MTok out, $3.75/MTok cache_fill, $0.30/MTok cache_read
+    const cost_usd = usage
+      ? Math.round((usage.tokensIn * 3 + usage.tokensOut * 15 + usage.cacheFill * 3.75 + usage.cacheRead * 0.30) / 1_000_000 * 10_000) / 10_000
+      : undefined
+    const cache_hit_pct = usage && (usage.tokensIn + usage.cacheRead) > 0
+      ? Math.round(usage.cacheRead / (usage.tokensIn + usage.cacheRead) * 1000) / 10
+      : undefined
     log({
       event: 'agent_run', project: projectLabel, agent: agentLabel, status: 'success',
       duration_s: Math.round(durationMs / 100) / 10,
       ...(usage ? { tokens_in: usage.tokensIn, tokens_out: usage.tokensOut, cache_read: usage.cacheRead, cache_fill: usage.cacheFill } : {}),
+      ...(cost_usd !== undefined ? { cost_usd } : {}),
+      ...(cache_hit_pct !== undefined ? { cache_hit_pct } : {}),
     })
     return {
       success: true,
