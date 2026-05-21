@@ -782,6 +782,101 @@ program
     console.log(`  archived  ${projectId}/tasks/${match}`)
   })
 
+// ── report ────────────────────────────────────────────────────────────────────
+
+program
+  .command('report')
+  .description('Summarise last 24h of agent runs → 60_Agents/5_Inbox/YYYYMMdd-report.md')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .option('--hours <n>', 'Lookback window in hours (default: 24)', '24')
+  .option('--dry-run', 'Print to stdout without writing')
+  .action(async (opts: { vault?: string; hours?: string; dryRun?: boolean }) => {
+    const { writeFile } = await import('node:fs/promises')
+    const vaultPath = getVaultPath(opts)
+    const config = defineConfig({ vaultPath })
+    const hours = Number(opts.hours ?? 24)
+    const cutoff = new Date(Date.now() - hours * 3_600_000)
+
+    const state = await scanVault(config)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const today = new Date()
+    const dateStr = `${today.getFullYear()}${pad(today.getMonth() + 1)}${pad(today.getDate())}`
+
+    interface RunEntry { agent: string; project: string; success: boolean | undefined; duration: number | undefined; ts: string }
+    const runs: RunEntry[] = []
+
+    for (const agent of state.agents) {
+      const entries = await (await import('./vault/logbook.js')).readLogbook(agent.id, config)
+      for (const e of entries) {
+        if (new Date(e.timestamp) >= cutoff) {
+          runs.push({ agent: agent.id, project: e.projectName, success: e.success, duration: e.duration, ts: e.timestamp })
+        }
+      }
+    }
+
+    runs.sort((a, b) => a.ts.localeCompare(b.ts))
+
+    const successes = runs.filter(r => r.success === true).length
+    const failures = runs.filter(r => r.success === false).length
+    const avgDur = runs.filter(r => r.duration).reduce((s, r) => s + (r.duration ?? 0), 0) / (runs.filter(r => r.duration).length || 1)
+
+    const lines = [
+      `# Report — ${dateStr} (últimas ${hours}h)`,
+      '',
+      `**Runs:** ${runs.length}  ·  **Sucesso:** ${successes}  ·  **Falhas:** ${failures}  ·  **Duração média:** ${avgDur.toFixed(1)}s`,
+      '',
+    ]
+
+    if (failures > 0) {
+      lines.push('## Falhas')
+      for (const r of runs.filter(r => r.success === false)) {
+        lines.push(`- ✗ **${r.project}** via ${r.agent} @ ${r.ts.slice(11, 16)}`)
+      }
+      lines.push('')
+    }
+
+    lines.push('## Execuções')
+    for (const r of runs) {
+      const icon = r.success === true ? '✓' : r.success === false ? '✗' : '·'
+      const dur = r.duration ? ` (${r.duration.toFixed(1)}s)` : ''
+      lines.push(`- ${icon} **${r.project}** via ${r.agent}${dur} @ ${r.ts.slice(11, 16)}`)
+    }
+
+    if (runs.length === 0) lines.push('_Nenhuma execução registrada no período._')
+
+    const markdown = lines.join('\n') + '\n'
+
+    if (opts.dryRun) {
+      process.stdout.write(markdown)
+    } else {
+      const outPath = join(vaultPath, config.logbooksDir, '..', '5_Inbox', `${dateStr}-report.md`)
+        .replace(/\/\.\.\//g, '/')
+      const resolvedPath = join(vaultPath, '60_Agents', '5_Inbox', `${dateStr}-report.md`)
+      await writeFile(resolvedPath, markdown, 'utf8')
+      console.log(`  written  60_Agents/5_Inbox/${dateStr}-report.md  (${runs.length} runs)`)
+    }
+  })
+
+// ── backlinks ─────────────────────────────────────────────────────────────────
+
+program
+  .command('backlinks <note>')
+  .description('Find all vault files linking to a note (wikilinks + markdown links)')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .action(async (note: string, opts: { vault?: string }) => {
+    const { findBacklinks } = await import('./vault/backlinks.js')
+    const vaultPath = getVaultPath(opts)
+    const notePath = note.startsWith('/') ? note : join(vaultPath, note)
+    const results = await findBacklinks(vaultPath, notePath)
+
+    if (results.length === 0) {
+      console.log(`No backlinks found for "${note}"`)
+      return
+    }
+    console.log(`${results.length} backlink(s) → ${note}`)
+    for (const r of results) console.log(`  ${r.sourceRelative}`)
+  })
+
 // ── plan ─────────────────────────────────────────────────────────────────────
 
 program

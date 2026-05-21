@@ -5,6 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { VaultCache } from './cache.js'
 import type { TavernaConfig } from '../config.js'
 import { parseFrontmatter, getString } from '../vault/frontmatter.js'
+import { findBacklinks } from '../vault/backlinks.js'
 
 type SSEClient = ServerResponse
 
@@ -41,6 +42,7 @@ export class Router {
     if (path === '/agents') return this.handleAgents(req, res)
     if (path === '/events') return this.handleSSE(req, res)
     if (path === '/inbox') return this.handleInbox(req, res)
+    if (path === '/backlinks') return this.handleBacklinks(req, res, url)
     this.json(res, { error: 'not found' }, 404)
   }
 
@@ -87,6 +89,14 @@ export class Router {
     res.write(`event: connected\ndata: ${new Date().toISOString()}\n\n`)
     this.sseClients.add(res)
     req.on('close', () => this.sseClients.delete(res))
+  }
+
+  private async handleBacklinks(_req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+    const note = url.searchParams.get('note')
+    if (!note) return this.json(res, { error: 'missing ?note= parameter' }, 400)
+    const notePath = note.startsWith('/') ? note : join(this.config.vaultPath, note)
+    const results = await findBacklinks(this.config.vaultPath, notePath)
+    this.json(res, { note, count: results.length, backlinks: results })
   }
 
   private async handleInbox(_req: IncomingMessage, res: ServerResponse): Promise<void> {
