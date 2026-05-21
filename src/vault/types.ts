@@ -22,6 +22,7 @@ export interface VaultTask {
   deadline?: string
   assetFolder?: string
   state: TaskState
+  body: string
   raw: RawFrontmatter
 }
 

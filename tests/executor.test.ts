@@ -43,7 +43,7 @@ describe('buildPrompt', () => {
 
   it('includes project type in header', () => {
     const prompt = buildPrompt(mockAgent, mockProject, 8000)
-    expect(prompt).toContain('Type: *')
+    expect(prompt).toContain('**Type:** *')
   })
 
   it('truncates at 0 available chars without crashing', () => {

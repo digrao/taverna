@@ -45,6 +45,7 @@ export async function readProjectTasks(projectFolderPath: string): Promise<Vault
       ...(deadline !== undefined ? { deadline } : {}),
       ...(assetFolder !== undefined ? { assetFolder } : {}),
       state: progressToState(progresso),
+      body: content.trim(),
       raw: data,
     })
   }
