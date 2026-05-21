@@ -10,6 +10,8 @@ import { processInbox, MAX_CHARS_PER_RUN } from './inbox/index.js'
 import { migrate } from './migrate/index.js'
 import { fetchEntries, fetchProjects, matchEntries, writeDeepWorkToFrontmatter } from './clockify/index.js'
 import type { ClockifyConfig } from './clockify/index.js'
+import { runScheduler } from './pm/scheduler.js'
+import type { TypePolicy } from './pm/scheduler.js'
 
 import type { VaultAgent, VaultProject } from './vault/index.js'
 import type { TavernaConfig } from './config.js'
@@ -491,6 +493,90 @@ clockifyCmd
     }
     const total = stats.reduce((acc, s) => acc + s.weekHours, 0)
     console.log(`\n  ${'Total'.padEnd(24)} ${total.toFixed(1)}h`)
+  })
+
+// ── schedule ──────────────────────────────────────────────────────────────────
+
+program
+  .command('schedule')
+  .description('Run the centralized scheduler daemon (replaces systemd timers)')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .option('--dry-run', 'Print what would run without executing agents')
+  .option('--tick-ms <ms>', 'Tick interval in milliseconds (default: 60000)', '60000')
+  .option('--once', 'Run one tick and exit')
+  .action(async (opts: { vault?: string; dryRun?: boolean; tickMs?: string; once?: boolean }) => {
+    const vaultPath = getVaultPath(opts)
+    const config = defineConfig({ vaultPath })
+
+    const typePolicies: TypePolicy[] = [
+      {
+        tipo: 'USP',
+        steps: [
+          { agent: config.agentDefaults['USP'] ?? '@study-assistant', at: '09:00' },
+          { agent: config.agentDefaults['USP'] ?? '@study-assistant', at: 'EOD' },
+          { agent: config.agentDefaults['USP'] ?? '@study-assistant' },
+        ],
+      },
+      {
+        tipo: 'BB',
+        steps: [{ agent: config.agentDefaults['BB'] ?? '@planner' }],
+      },
+      {
+        tipo: '*',
+        steps: [{ agent: config.agentDefaults['*'] ?? '@dev-agent' }],
+      },
+    ]
+
+    const tickMs = Number(opts.tickMs ?? 60_000)
+    const maxTicks = opts.once ? 1 : undefined
+
+    console.log(`Scheduler started (tick: ${tickMs}ms${opts.once ? ', one-shot' : ''})`)
+    if (opts.dryRun) console.log('Dry-run mode — no agents will execute')
+
+    await runScheduler(config, typePolicies, {
+      dryRun: opts.dryRun ?? false,
+      tickMs,
+      ...(maxTicks !== undefined ? { maxTicks } : {}),
+    })
+  })
+
+// ── archive-task ──────────────────────────────────────────────────────────────
+
+program
+  .command('archive-task <project> <task-id>')
+  .description('Mark a task as done (progresso: 100) and move it to tasks/archive/')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .action(async (projectId: string, taskId: string, opts: { vault?: string }) => {
+    const vaultPath = getVaultPath(opts)
+    const config = defineConfig({ vaultPath })
+    const { join: pjoin } = await import('node:path')
+    const { rename, readFile, writeFile, mkdir } = await import('node:fs/promises')
+    const { existsSync } = await import('node:fs')
+    const matter = (await import('gray-matter')).default
+
+    const projectsDir = pjoin(vaultPath, config.projectsDir)
+    // Support partial match: "07" matches "07-token-usage-logging"
+    const { readdir } = await import('node:fs/promises')
+    const entries = await readdir(pjoin(projectsDir, projectId, 'tasks')).catch(() => [] as string[])
+    const match = entries.find(f => f.startsWith(taskId) && f.endsWith('.md') && !f.includes('archive'))
+
+    if (!match) {
+      console.error(`Task not found: ${taskId} in ${projectId}/tasks/`)
+      process.exit(1)
+    }
+
+    const taskPath = pjoin(projectsDir, projectId, 'tasks', match)
+    const archiveDir = pjoin(projectsDir, projectId, 'tasks', 'archive')
+    const archivePath = pjoin(archiveDir, match)
+
+    const raw = await readFile(taskPath, 'utf8')
+    const parsed = matter(raw)
+    parsed.data['progresso'] = 100
+    await mkdir(archiveDir, { recursive: true })
+    await writeFile(taskPath, matter.stringify(parsed.content, parsed.data), 'utf8')
+    await rename(taskPath, archivePath)
+
+    console.log(`  archived  ${projectId}/tasks/${match}`)
   })
 
 program.parse()
