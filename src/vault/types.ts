@@ -32,6 +32,9 @@ export interface VaultAgent {
   runner: AgentRunner
   directiveText: string
   directivesPath: string
+  // Explicit tool allowlist declared in directive frontmatter.
+  // When set, executor uses --allowedTools instead of bypassPermissions.
+  permissions?: string[]
 }
 
 export interface BaseProject {

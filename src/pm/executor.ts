@@ -22,9 +22,19 @@ export function parseResultado(output: string): string | undefined {
   return line ? line.replace(/^RESULTADO:\s*/, '').trim() || undefined : undefined
 }
 
-function spawnClaude(prompt: string, permissionMode: string, timeoutMs: number): Promise<string> {
+function spawnClaude(
+  prompt: string,
+  permissionMode: string,
+  timeoutMs: number,
+  allowedTools?: string[],
+): Promise<string> {
+  const args = ['--print', '--permission-mode', permissionMode]
+  if (allowedTools && allowedTools.length > 0) {
+    args.push('--allowedTools', allowedTools.join(','))
+  }
+
   return new Promise((resolve, reject) => {
-    const proc = spawn('claude', ['--print', '--permission-mode', permissionMode], {
+    const proc = spawn('claude', args, {
       stdio: ['pipe', 'pipe', 'pipe'],
     })
 
@@ -57,7 +67,11 @@ export async function runAgent(
 ): Promise<AgentResult> {
   const maxContextChars = opts?.maxContextChars ?? 8000
   const timeoutMs = opts?.timeoutMs ?? 120_000
-  const permissionMode = opts?.permissionMode ?? 'bypassPermissions'
+
+  // If the agent declares permissions, use default mode + explicit allowlist.
+  // Otherwise fall back to bypassPermissions for backward compatibility.
+  const permissionMode = opts?.permissionMode ?? (agent.permissions ? 'default' : 'bypassPermissions')
+  const allowedTools = agent.permissions
 
   const prompt = buildPrompt(agent, project, maxContextChars)
 
@@ -67,7 +81,7 @@ export async function runAgent(
 
   const start = Date.now()
   try {
-    const output = await spawnClaude(prompt, permissionMode, timeoutMs)
+    const output = await spawnClaude(prompt, permissionMode, timeoutMs, allowedTools)
     const durationMs = Date.now() - start
     const resultado = parseResultado(output)
     return {

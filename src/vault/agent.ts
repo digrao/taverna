@@ -1,7 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join, basename } from 'node:path'
 import { existsSync } from 'node:fs'
-import { parseFrontmatter, getString } from './frontmatter.js'
+import { parseFrontmatter, getString, getStringArray } from './frontmatter.js'
 import type { VaultAgent, AgentRunner } from './types.js'
 
 export async function readAgent(folderPath: string): Promise<VaultAgent> {
@@ -21,6 +21,8 @@ export async function readAgent(folderPath: string): Promise<VaultAgent> {
     ...(model != null ? { model } : {}),
   }
 
+  const permissions = getStringArray(data, 'permissions')
+
   return {
     id,
     folderName,
@@ -28,6 +30,7 @@ export async function readAgent(folderPath: string): Promise<VaultAgent> {
     runner,
     directiveText: content.trim(),
     directivesPath,
+    ...(permissions.length > 0 ? { permissions } : {}),
   }
 }
 
