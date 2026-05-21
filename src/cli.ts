@@ -116,35 +116,51 @@ assetsCmd
 // ── run ───────────────────────────────────────────────────────────────────────
 
 program
-  .command('run <agent>')
-  .description('Run an agent on a project')
+  .command('run [agent]')
+  .description('Run an agent on a project. Agent is auto-detected from project frontmatter or tipo if omitted.')
   .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--project <id>', 'Project ID to run agent on')
+  .option('--project <id>', 'Project ID (required when agent is omitted)')
   .option('--dry-run', 'Print the prompt without executing')
   .option('--max-chars <n>', 'Max context chars', '8000')
-  .action(async (agentId: string, opts: { vault?: string; project?: string; dryRun?: boolean; maxChars?: string }) => {
+  .action(async (agentId: string | undefined, opts: { vault?: string; project?: string; dryRun?: boolean; maxChars?: string }) => {
     const vaultPath = getVaultPath(opts)
     const config = defineConfig({ vaultPath })
     const vault = await scanVault(config)
 
-    const agentName = agentId.startsWith('@') ? agentId : `@${agentId}`
-    const agent = vault.agents.find(a => a.id === agentName || a.folderName === agentName)
-    if (!agent) {
-      console.error(`Agent ${agentName} not found. Available: ${vault.agents.map(a => a.id).join(', ')}`)
-      process.exit(1)
-    }
-
+    // Resolve which projects to run on
     const projects = opts.project
       ? vault.projects.filter(p => p.id === opts.project || p.name === opts.project)
-      : vault.projects.filter(p => p.agent === agentName)
+      : agentId
+        ? vault.projects.filter(p => {
+            const name = agentId.startsWith('@') ? agentId : `@${agentId}`
+            return p.agent === name
+          })
+        : []
 
     if (projects.length === 0) {
-      console.error(`No projects found for agent ${agentName}`)
+      const hint = opts.project ? `project "${opts.project}"` : `agent "${agentId}"`
+      console.error(`No projects found for ${hint}`)
       process.exit(1)
     }
 
     for (const project of projects) {
-      console.log(`\nRunning ${agentName} on ${project.id}…`)
+      // Agent resolution order: CLI arg → project.agent → tipo default
+      const resolvedAgentName = agentId
+        ? (agentId.startsWith('@') ? agentId : `@${agentId}`)
+        : project.agent ?? config.agentDefaults[project.tipo]
+
+      if (!resolvedAgentName) {
+        console.error(`  skip ${project.id}: no agent declared and no default for tipo "${project.tipo}"`)
+        continue
+      }
+
+      const agent = vault.agents.find(a => a.id === resolvedAgentName || a.folderName === resolvedAgentName)
+      if (!agent) {
+        console.error(`  skip ${project.id}: agent ${resolvedAgentName} not found (available: ${vault.agents.map(a => a.id).join(', ')})`)
+        continue
+      }
+
+      console.log(`\nRunning ${agent.id} on ${project.id}…`)
       const result = await runAgent(agent, project, {
         ...(opts.dryRun ? { dryRun: true as const } : {}),
         ...(opts.maxChars ? { maxContextChars: Number(opts.maxChars) } : {}),

@@ -11,6 +11,8 @@ export interface TavernaConfig {
   copypartyUrl?: string
   gdriveRemote: string
   gdriveBasePath: string
+  // Default agent per project tipo when project.agent is not set
+  agentDefaults: Record<string, string>
 }
 
 export function defineConfig(overrides: Partial<TavernaConfig> & { vaultPath: string }): TavernaConfig {
@@ -29,6 +31,11 @@ export function defineConfig(overrides: Partial<TavernaConfig> & { vaultPath: st
     assetExtensions: overrides.assetExtensions ?? ['pdf', 'ppt', 'pptx', 'zip', 'docx', 'mat', 'vhd'],
     gdriveRemote: overrides.gdriveRemote ?? 'jv',
     gdriveBasePath: overrides.gdriveBasePath ?? 'obsidian',
+    agentDefaults: overrides.agentDefaults ?? {
+      'USP': '@study-assistant',
+      'BB':  '@planner',
+      '*':   '@dev-agent',
+    },
     ...(overrides.copypartyUrl !== undefined ? { copypartyUrl: overrides.copypartyUrl } : {}),
   }
 }
