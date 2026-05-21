@@ -782,4 +782,84 @@ program
     console.log(`  archived  ${projectId}/tasks/${match}`)
   })
 
+// ── plan ─────────────────────────────────────────────────────────────────────
+
+program
+  .command('plan')
+  .description('Aggregate pending tasks across all projects and write STATUS.md to vault root')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .option('--dry-run', 'Print to stdout without writing')
+  .action(async (opts: { vault?: string; dryRun?: boolean }) => {
+    const { writeFile } = await import('node:fs/promises')
+    const { computeHealth } = await import('./pm/loki.js')
+
+    const vaultPath = getVaultPath(opts)
+    const config = defineConfig({ vaultPath })
+    const vault = await scanVault(config)
+
+    const PRIO_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 }
+    const sorted = [...vault.projects].sort((a, b) => (PRIO_ORDER[a.priority] ?? 1) - (PRIO_ORDER[b.priority] ?? 1))
+
+    const now = new Date()
+    const dateStr = now.toISOString().split('T')[0]
+    const lines: string[] = [
+      `# STATUS — ${dateStr}`,
+      '',
+      `_${vault.projects.length} projetos · gerado por \`taverna plan\`_`,
+      '',
+    ]
+
+    for (const project of sorted) {
+      const snap = computeHealth(project)
+      const pending = project.tasks.filter(t => t.progresso < 100)
+      const HEALTH_ICON: Record<string, string> = { ok: '🟢', 'at-risk': '🟡', overdue: '🔴', idle: '⚪' }
+      const icon = HEALTH_ICON[snap.health] ?? '⚪'
+      const prio = project.priority === 'high' ? '[HIGH]' : project.priority === 'medium' ? '[MED]' : '[LOW]'
+      lines.push(`## ${icon} ${prio} ${project.id} (${project.tipo})`)
+
+      if (snap.deadline_days !== undefined) {
+        const dl = snap.deadline_days < 0 ? `${Math.abs(snap.deadline_days)}d atrasado` : `${snap.deadline_days}d`
+        lines.push(`_deadline: ${dl} · progresso: ${snap.progresso}%_`)
+      } else if (snap.progresso > 0) {
+        lines.push(`_progresso: ${snap.progresso}%_`)
+      }
+
+      if (pending.length === 0) {
+        lines.push('_sem tasks pendentes_')
+      } else {
+        for (const t of pending.slice(0, 5)) {
+          const pct = t.progresso > 0 ? ` (${t.progresso}%)` : ''
+          const blocked = t.bloqueio ? ` ⚠ ${t.bloqueio}` : ''
+          const waiting = t.requerHumano?.length ? ` 👤 aguardando humano` : ''
+          lines.push(`- [ ] ${t.title}${pct}${blocked}${waiting}`)
+        }
+        if (pending.length > 5) lines.push(`- _…mais ${pending.length - 5} task(s)_`)
+      }
+      lines.push('')
+    }
+
+    const markdown = lines.join('\n')
+
+    if (opts.dryRun) {
+      process.stdout.write(markdown + '\n')
+    } else {
+      await writeFile(join(vaultPath, 'STATUS.md'), markdown, 'utf8')
+      console.log(`  written  STATUS.md  (${vault.projects.length} projects)`)
+    }
+  })
+
+// ── serve ─────────────────────────────────────────────────────────────────────
+
+program
+  .command('serve')
+  .description('Start HTTP status server (default port: 2948)')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .option('--port <n>', 'Port to listen on', '2948')
+  .action(async (opts: { vault?: string; port?: string }) => {
+    const { createServer } = await import('./server/index.js')
+    const vaultPath = getVaultPath(opts)
+    const config = defineConfig({ vaultPath })
+    createServer(config, { port: Number(opts.port ?? 2948) })
+  })
+
 program.parse()
