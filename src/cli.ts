@@ -42,8 +42,9 @@ async function runOnce(
     return { success: true }
   }
 
+  // Only advance lastRun on success — failures retry on the next cycle
   await updateProjectStatus(project.filePath, {
-    lastRun: new Date().toISOString(),
+    ...(result.success ? { lastRun: new Date().toISOString() } : {}),
     lastStatus: result.success ? 'success' : 'failed',
     runsTotal: project.runsTotal + 1,
   })

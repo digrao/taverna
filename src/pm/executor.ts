@@ -67,7 +67,7 @@ export async function runAgent(
   opts?: ExecutorOptions,
 ): Promise<AgentResult> {
   const maxContextChars = opts?.maxContextChars ?? 8000
-  const timeoutMs = opts?.timeoutMs ?? 120_000
+  const timeoutMs = opts?.timeoutMs ?? 600_000
 
   // If the agent declares permissions, use default mode + explicit allowlist.
   // Otherwise fall back to bypassPermissions for backward compatibility.
