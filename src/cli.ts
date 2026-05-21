@@ -4,14 +4,19 @@ import { join } from 'node:path'
 import { morning } from './morning/index.js'
 import { defineConfig } from './config.js'
 import { storeAssets, pullAssets, statusAssets } from './assets/index.js'
-import { scanVault, appendLogbook, updateProjectStatus, readProject } from './vault/index.js'
+import { scanVault, appendLogbook, appendProjectLogbook, updateProjectStatus, readProject } from './vault/index.js'
 import { runAgent, runPipeline } from './pm/executor.js'
+import { snapshot, computeHealth } from './pm/loki.js'
+import { updateBoardFile } from './usp/board.js'
+import { writeActionRequest } from './inbox/action.js'
+import type { ActionUrgency } from './inbox/action.js'
 import { processInbox, MAX_CHARS_PER_RUN } from './inbox/index.js'
 import { migrate } from './migrate/index.js'
 import { fetchEntries, fetchProjects, matchEntries, writeDeepWorkToFrontmatter } from './clockify/index.js'
 import type { ClockifyConfig } from './clockify/index.js'
 import { runScheduler } from './pm/scheduler.js'
 import type { TypePolicy } from './pm/scheduler.js'
+import { defaultTypePolicies } from './pm/policies.js'
 
 import type { VaultAgent, VaultProject } from './vault/index.js'
 import type { TavernaConfig } from './config.js'
@@ -74,6 +79,54 @@ async function runOnce(
     success: result.success,
     duration: result.durationMs / 1000,
   }, config)
+
+  snapshot(project)
+
+  // Per-project logbook (task 04)
+  if (project.folderPath) {
+    await appendProjectLogbook(project.folderPath, {
+      projectName: project.id,
+      content: [
+        `**Agent:** ${agent.id}`,
+        `**Success:** ${result.success}`,
+        `**Duration:** ${(result.durationMs / 1000).toFixed(1)}s`,
+        ...(result.resultado ? [`**Resultado:** ${result.resultado}`] : []),
+        ...(result.error ? [`**Error:** ${result.error}`] : []),
+      ].join('\n'),
+      success: result.success,
+      duration: result.durationMs / 1000,
+    })
+  }
+
+  // Inbox notification when human action is needed (task 03)
+  if (!dryRun) {
+    const blockedTasks = project.tasks.filter(t => t.bloqueio || (t.requerHumano && t.requerHumano.length > 0))
+    const snap = computeHealth(project)
+
+    if (result.actionRequired) {
+      await writeActionRequest(config.vaultPath, {
+        projeto: project.id,
+        agente: agent.id,
+        urgencia: 'high',
+        oQueAconteceu: result.actionRequired,
+        acoes: ['Resolver o bloqueio indicado pelo agente e rodar novamente'],
+        contexto: result.output,
+      })
+    } else if (blockedTasks.length > 0) {
+      const urgencia: ActionUrgency = snap.health === 'overdue' || blockedTasks.some(t => t.bloqueio) ? 'high' : 'medium'
+      const acoes = blockedTasks.flatMap(t => [
+        ...(t.bloqueio ? [`[${t.id}] Resolver bloqueio: ${t.bloqueioDetalhe ?? t.bloqueio}`] : []),
+        ...(t.requerHumano ?? []).map(a => `[${t.id}] ${a}`),
+      ])
+      await writeActionRequest(config.vaultPath, {
+        projeto: project.id,
+        agente: agent.id,
+        urgencia,
+        oQueAconteceu: `${blockedTasks.length} task(s) aguardando ação humana`,
+        acoes,
+      })
+    }
+  }
 
   console.log(result.success ? `  done (${result.durationMs}ms)` : `  failed: ${result.error}`)
   if (result.resultado) console.log(`  RESULTADO: ${result.resultado}`)
@@ -495,6 +548,173 @@ clockifyCmd
     console.log(`\n  ${'Total'.padEnd(24)} ${total.toFixed(1)}h`)
   })
 
+// ── policy ────────────────────────────────────────────────────────────────────
+
+program
+  .command('policy [project-id]')
+  .description('Show effective scheduling policy for a project (or all projects)')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .option('--tipo <tipo>', 'Filter by project type: USP, BB, *')
+  .action(async (projectId: string | undefined, opts: { vault?: string; tipo?: string }) => {
+    const { readProjectPolicy, mergePolicy, getTypePolicy } = await import('./pm/scheduler.js')
+    const { computeHealth } = await import('./pm/loki.js')
+
+    const FREQ_LABEL: Record<string, string> = {
+      hourly: '1h', daily: '24h', weekly: '7d', monthly: '30d', never: 'never',
+    }
+    const FREQ_MS: Record<string, number> = {
+      hourly: 3_600_000, daily: 86_400_000, weekly: 604_800_000, monthly: 2_592_000_000,
+    }
+
+    function fmtNextRun(project: import('./vault/types.js').VaultProject): string {
+      if (project.runEvery === 'never') return 'nunca'
+      const freq = FREQ_MS[project.runEvery]
+      if (!freq) return '?'
+      const lastMs = project.lastRun ? new Date(project.lastRun).getTime() : 0
+      const nextMs = lastMs + freq
+      const diffS = Math.round((nextMs - Date.now()) / 1000)
+      if (diffS <= 0) return 'agora (overdue)'
+      const h = Math.floor(diffS / 3600)
+      if (h < 1) return `em ${Math.floor(diffS / 60)}min`
+      if (h < 24) return `em ${h}h`
+      return `em ${Math.floor(h / 24)}d`
+    }
+
+    const vaultPath = getVaultPath(opts)
+    const config = defineConfig({ vaultPath })
+    const vault = await scanVault(config)
+    const typePolicies = defaultTypePolicies(config)
+
+    const projects = projectId
+      ? vault.projects.filter(p => p.id === projectId || p.name === projectId)
+      : opts.tipo
+        ? vault.projects.filter(p => p.tipo === opts.tipo)
+        : vault.projects
+
+    if (projects.length === 0) {
+      console.error(`No projects found${projectId ? ` for "${projectId}"` : ''}`)
+      process.exit(1)
+    }
+
+    const hr = '─'.repeat(52)
+
+    for (const project of projects) {
+      const typeSteps = getTypePolicy(project.tipo, typePolicies)
+      const projectPolicy = readProjectPolicy(project.raw)
+      const effectiveSteps = mergePolicy(typeSteps, projectPolicy)
+      const snap = computeHealth(project)
+
+      const composeMode = projectPolicy?.compose ?? 'inherit (default)'
+      const hasOverride = projectPolicy !== undefined
+
+      console.log(`\n${hr}`)
+      console.log(`${project.id}  ·  tipo: ${project.tipo}  ·  priority: ${project.priority}  ·  runEvery: ${project.runEvery} (${FREQ_LABEL[project.runEvery] ?? '?'})`)
+      console.log(hr)
+
+      console.log(`\nType policy (${project.tipo}):`)
+      if (typeSteps.length === 0) {
+        console.log('  (none)')
+      } else {
+        typeSteps.forEach((s, i) => {
+          const at = s.at ? `  at ${s.at}` : '  (any time)'
+          console.log(`  ${i + 1}  ${s.agent}${at}`)
+        })
+      }
+
+      console.log(`\nProject overrides:  ${hasOverride ? `compose=${projectPolicy!.compose}` : 'none'}`)
+      if (hasOverride && projectPolicy!.steps.length > 0) {
+        projectPolicy!.steps.forEach((s, i) => {
+          const at = s.at ? `  at ${s.at}` : '  (any time)'
+          console.log(`  ${i + 1}  ${s.agent}${at}`)
+        })
+      }
+
+      console.log(`\nEffective steps:  (compose: ${composeMode})`)
+      if (effectiveSteps.length === 0) {
+        console.log('  (none — project will not run)')
+      } else {
+        effectiveSteps.forEach((s, i) => {
+          const at = s.at ? `  at ${s.at}` : '  (any time, governed by runEvery)'
+          console.log(`  ${i + 1}  ${s.agent}${at}`)
+        })
+      }
+
+      console.log(`\nSchedule:`)
+      console.log(`  Last run:    ${project.lastRun ? new Date(project.lastRun).toLocaleString('pt-BR') : 'never'} (${project.lastStatus ?? '—'})`)
+      console.log(`  Runs total:  ${project.runsTotal}`)
+      console.log(`  Next run:    ${fmtNextRun(project)}`)
+
+      console.log(`\nHealth:`)
+      console.log(`  Tasks:       ${snap.tasks_done}/${snap.tasks_total} done  (progresso: ${snap.progresso}%)`)
+      if (snap.deadline_days !== undefined) {
+        const dLabel = snap.deadline_days < 0
+          ? `${Math.abs(snap.deadline_days)}d atrás`
+          : snap.deadline_days === 0 ? 'hoje' : `${snap.deadline_days}d`
+        console.log(`  Deadline:    ${dLabel}`)
+      }
+      console.log(`  Status:      ${snap.health}`)
+    }
+    console.log(`\n${hr}`)
+  })
+
+// ── usp-board ─────────────────────────────────────────────────────────────────
+
+program
+  .command('usp-board')
+  .description('Update USP health board in 20_Areas/2_Estudos/Escola Politécnica da USP.md')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .option('--dry-run', 'Print the generated block without writing')
+  .action(async (opts: { vault?: string; dryRun?: boolean }) => {
+    const vaultPath = getVaultPath(opts)
+    const config = defineConfig({ vaultPath })
+    const vault = await scanVault(config)
+    const uspProjects = vault.projects.filter(p => p.tipo === 'USP')
+
+    if (uspProjects.length === 0) {
+      console.log('No USP projects found.')
+      return
+    }
+
+    const { generateBoardBlock } = await import('./usp/board.js')
+    const block = generateBoardBlock(uspProjects, new Date())
+
+    if (opts.dryRun) {
+      console.log(block)
+    } else {
+      const boardPath = join(vaultPath, '20_Areas', '2_Estudos', 'Escola Politécnica da USP.md')
+      await updateBoardFile(boardPath, uspProjects)
+      console.log(`  updated  ${boardPath.replace(vaultPath + '/', '')}`)
+    }
+  })
+
+// ── snapshot ──────────────────────────────────────────────────────────────────
+
+program
+  .command('snapshot')
+  .description('Emit project_snapshot events for all projects (health + priority) without running agents')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .option('--tipo <tipo>', 'Filter by project type: USP, BB, *')
+  .option('--dry-run', 'Print JSON to stdout without journal emission')
+  .action(async (opts: { vault?: string; tipo?: string; dryRun?: boolean }) => {
+    const vaultPath = getVaultPath(opts)
+    const config = defineConfig({ vaultPath })
+    const vault = await scanVault(config)
+
+    const projects = opts.tipo
+      ? vault.projects.filter(p => p.tipo === opts.tipo)
+      : vault.projects
+
+    for (const project of projects) {
+      const payload = (await import('./pm/loki.js')).computeHealth(project)
+      if (opts.dryRun) {
+        console.log(JSON.stringify(payload, null, 2))
+      } else {
+        snapshot(project)
+        console.log(`  ${project.id.padEnd(28)} health=${payload.health} progresso=${payload.progresso}%`)
+      }
+    }
+  })
+
 // ── schedule ──────────────────────────────────────────────────────────────────
 
 program
@@ -508,24 +728,7 @@ program
     const vaultPath = getVaultPath(opts)
     const config = defineConfig({ vaultPath })
 
-    const typePolicies: TypePolicy[] = [
-      {
-        tipo: 'USP',
-        steps: [
-          { agent: config.agentDefaults['USP'] ?? '@study-assistant', at: '09:00' },
-          { agent: config.agentDefaults['USP'] ?? '@study-assistant', at: 'EOD' },
-          { agent: config.agentDefaults['USP'] ?? '@study-assistant' },
-        ],
-      },
-      {
-        tipo: 'BB',
-        steps: [{ agent: config.agentDefaults['BB'] ?? '@planner' }],
-      },
-      {
-        tipo: '*',
-        steps: [{ agent: config.agentDefaults['*'] ?? '@dev-agent' }],
-      },
-    ]
+    const typePolicies = defaultTypePolicies(config)
 
     const tickMs = Number(opts.tickMs ?? 60_000)
     const maxTicks = opts.once ? 1 : undefined

@@ -1,4 +1,4 @@
-import { readFile, appendFile, mkdir } from 'node:fs/promises'
+import { readFile, appendFile, mkdir, writeFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
 import type { LogbookEntry } from './types.js'
@@ -78,6 +78,25 @@ export async function appendLogbook(
   await mkdir(logbooksDir, { recursive: true })
   const filePath = join(logbooksDir, agentFileName(agentId))
   const timestamp = new Date().toISOString()
+  const heading = `## [${timestamp}] ${entry.projectName}\n`
+  const body = entry.content ? `${entry.content}\n` : ''
+  await appendFile(filePath, `\n${heading}${body}`, 'utf8')
+}
+
+export async function appendProjectLogbook(
+  projectFolderPath: string,
+  entry: Omit<LogbookEntry, 'timestamp'>,
+): Promise<void> {
+  const filePath = join(projectFolderPath, 'logbook.md')
+  const timestamp = new Date().toISOString()
+
+  // Create with header if new
+  const { existsSync } = await import('node:fs')
+  if (!existsSync(filePath)) {
+    const projectId = entry.projectName
+    await writeFile(filePath, `# Logbook — ${projectId}\n\n<!-- append entries below; newest at bottom -->\n`, 'utf8')
+  }
+
   const heading = `## [${timestamp}] ${entry.projectName}\n`
   const body = entry.content ? `${entry.content}\n` : ''
   await appendFile(filePath, `\n${heading}${body}`, 'utf8')

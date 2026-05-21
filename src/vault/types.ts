@@ -4,7 +4,7 @@ export type Priority = 'high' | 'medium' | 'low'
 
 export type RunEvery = 'hourly' | 'daily' | 'weekly' | 'monthly' | 'never'
 
-export type TaskState = 'backlog' | 'tarefinha' | 'tarefa' | 'em-progresso' | 'concluida'
+export type TaskState = 'backlog' | 'tarefinha' | 'tarefa' | 'em-progresso' | 'aguardando_humano' | 'bloqueada' | 'concluida'
 
 export type ProjectType = 'USP' | 'BB' | '*'
 
@@ -22,6 +22,11 @@ export interface VaultTask {
   deadline?: string
   assetFolder?: string
   state: TaskState
+  // Artefatos que o humano precisa entregar antes de o agente prosseguir
+  requerHumano?: string[]
+  // Bloqueio técnico detectado pelo agente
+  bloqueio?: string
+  bloqueioDetalhe?: string
   body: string
   raw: RawFrontmatter
 }

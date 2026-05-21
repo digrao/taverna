@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import type { VaultAgent, VaultProject } from '../vault/types.js'
 import { updateCompletedTaskSessionId } from '../vault/update.js'
 import { buildPrompt } from './prompt.js'
+import { parseActionRequired } from '../inbox/action.js'
 import { log } from './loki.js'
 
 export interface ExecutorOptions {
@@ -27,6 +28,7 @@ export interface AgentResult {
   success: boolean
   output: string
   resultado?: string
+  actionRequired?: string
   durationMs: number
   sessionId?: string
   usage?: TokenUsage
@@ -169,7 +171,7 @@ export async function runAgent(
   const permissionMode = opts?.permissionMode ?? (agent.permissions ? 'default' : 'bypassPermissions')
   const allowedTools = agent.permissions
 
-  const prompt = buildPrompt(agent, project, maxContextChars, opts?.previousOutput)
+  const prompt = await buildPrompt(agent, project, maxContextChars, opts?.previousOutput)
 
   if (opts?.dryRun) {
     return { success: true, output: prompt, durationMs: 0 }
@@ -190,6 +192,7 @@ export async function runAgent(
     const { text, usage } = await spawnClaude(prompt, permissionMode, timeoutMs, allowedTools, sessionName, sessionId)
     const durationMs = Date.now() - start
     const resultado = parseResultado(text)
+    const actionRequired = parseActionRequired(text)
     if (pendingTaskPaths.length > 0) {
       await updateCompletedTaskSessionId(pendingTaskPaths, sessionId)
     }
@@ -214,6 +217,7 @@ export async function runAgent(
       sessionId,
       ...(usage ? { usage } : {}),
       ...(resultado !== undefined ? { resultado } : {}),
+      ...(actionRequired !== undefined ? { actionRequired } : {}),
     }
   } catch (e) {
     const durationMs = Date.now() - start

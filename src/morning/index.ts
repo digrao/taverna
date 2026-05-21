@@ -1,5 +1,7 @@
+import { join } from 'node:path'
 import { scanVault, sortByPriority, getPendingTasks, readLogbook } from '../vault/index.js'
 import { writeInbox } from '../vault/index.js'
+import { updateBoardFile } from '../usp/board.js'
 import type { TavernaConfig } from '../config.js'
 import type { VaultProject, LogbookEntry } from '../vault/types.js'
 
@@ -92,6 +94,13 @@ export async function morning(
   } else {
     const filename = config.morningFilename(today)
     await writeInbox(markdown, filename, config)
+
+    // Update USP health board in the vault
+    const uspProjects = state.projects.filter(p => p.tipo === 'USP')
+    if (uspProjects.length > 0) {
+      const boardPath = join(config.vaultPath, '20_Areas', '2_Estudos', 'Escola Politécnica da USP.md')
+      await updateBoardFile(boardPath, uspProjects)
+    }
   }
 
   return markdown

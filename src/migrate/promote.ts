@@ -65,6 +65,11 @@ export async function promote(
 
   await mkdir(projectFolder, { recursive: true })
   await writeFile(projectFile, projectContent, 'utf8')
+  await writeFile(
+    join(projectFolder, 'logbook.md'),
+    `# Logbook — ${draft.id}\n\n<!-- append entries below; newest at bottom -->\n`,
+    'utf8',
+  )
 
   const tasksCreated: string[] = []
   if (taskFiles.length > 0) {

@@ -1,4 +1,46 @@
+import { readFile } from 'node:fs/promises'
+import { join, dirname } from 'node:path'
+import { existsSync } from 'node:fs'
 import type { VaultProject, VaultAgent, VaultTask } from '../vault/types.js'
+
+const MODE_MAP: Record<string, string> = {
+  vhdl: 'vhdl.md',
+  matlab: 'matlab.md',
+  embarcados: 'embarcados.md',
+  python: 'python.md',
+  teoria: 'teoria.md',
+  triagem: 'triagem.md',
+}
+
+function detectStudyMode(task: VaultTask | undefined): string {
+  if (!task) return 'triagem'
+  const text = (task.title + ' ' + task.body).toLowerCase()
+  if (/\.vhd\b|ghdl|vhdl/.test(text)) return 'vhdl'
+  if (/\.m\b|matlab|octave/.test(text)) return 'matlab'
+  if (/\barm\b|cmakelist|mbed|embarcad/.test(text)) return 'embarcados'
+  if (/\.py\b|\.ipynb|pytorch|python/.test(text)) return 'python'
+  return 'teoria'
+}
+
+async function resolveDirectiveText(agent: VaultAgent, firstTask: VaultTask | undefined): Promise<string> {
+  const baseDir = dirname(agent.directivesPath)
+  const modesDir = join(baseDir, 'modes')
+  const conventionsPath = join(baseDir, 'conventions.md')
+
+  if (!existsSync(modesDir)) return agent.directiveText
+
+  const mode = detectStudyMode(firstTask)
+  const modeFile = join(modesDir, MODE_MAP[mode] ?? 'triagem.md')
+
+  const parts: string[] = [agent.directiveText]
+  if (existsSync(modeFile)) {
+    parts.push(await readFile(modeFile, 'utf8'))
+  }
+  if (existsSync(conventionsPath)) {
+    parts.push(await readFile(conventionsPath, 'utf8'))
+  }
+  return parts.join('\n\n---\n\n')
+}
 
 const PRIORITY_ICON: Record<string, string> = { high: '⬆', medium: '·', low: '⬇' }
 
@@ -45,11 +87,12 @@ This applies to every agent after finishing work on a task:
    \`RESULTADO: <summary of what was done>\`
 `
 
-export function buildPrompt(agent: VaultAgent, project: VaultProject, maxChars: number, previousOutput?: string): string {
+export async function buildPrompt(agent: VaultAgent, project: VaultProject, maxChars: number, previousOutput?: string): Promise<string> {
   const rawTarget = typeof project.raw['target'] === 'string' ? project.raw['target'] : undefined
   const target = rawTarget ? resolveTarget(rawTarget) : undefined
 
   const pending = project.tasks.filter(t => t.progresso < 100)
+  const directiveText = await resolveDirectiveText(agent, pending[0])
 
   const meta = [
     '# Agent Task',
@@ -61,7 +104,7 @@ export function buildPrompt(agent: VaultAgent, project: VaultProject, maxChars: 
     '',
     '## Directives',
     '',
-    agent.directiveText,
+    directiveText,
     '',
     COMPLETION_PROTOCOL,
     '',
