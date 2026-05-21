@@ -5,13 +5,26 @@ import { morning } from './morning/index.js'
 import { defineConfig } from './config.js'
 import { storeAssets, pullAssets, statusAssets } from './assets/index.js'
 import { scanVault, appendLogbook, updateProjectStatus, readProject } from './vault/index.js'
-import { runAgent } from './pm/executor.js'
+import { runAgent, runPipeline } from './pm/executor.js'
 import { processInbox, MAX_CHARS_PER_RUN } from './inbox/index.js'
 import { migrate } from './migrate/index.js'
+import { fetchEntries, fetchProjects, matchEntries, writeDeepWorkToFrontmatter } from './clockify/index.js'
+import type { ClockifyConfig } from './clockify/index.js'
 
 import type { VaultAgent, VaultProject } from './vault/index.js'
 import type { TavernaConfig } from './config.js'
 import type { ExecutorOptions } from './pm/executor.js'
+
+function getClockifyConfig(): ClockifyConfig {
+  const apiKey = process.env['CLOCKIFY_API_KEY']
+  const workspaceId = process.env['CLOCKIFY_WORKSPACE_ID']
+  const userId = process.env['CLOCKIFY_USER_ID']
+  if (!apiKey || !workspaceId || !userId) {
+    console.error('Error: CLOCKIFY_API_KEY, CLOCKIFY_WORKSPACE_ID, and CLOCKIFY_USER_ID are required')
+    process.exit(1)
+  }
+  return { apiKey, workspaceId, userId }
+}
 
 function getVaultPath(opts: { vault?: string }): string {
   const vaultPath = opts.vault ?? process.env['VAULT_PATH']
@@ -191,7 +204,8 @@ program
   .option('--timeout <ms>', 'Agent timeout in ms', '600000')
   .option('--drain', 'Run tasks sequentially until done or --max-tasks is reached')
   .option('--max-tasks <n>', 'Max tasks per drain session (default: 3)', '3')
-  .action(async (agentId: string | undefined, opts: { vault?: string; project?: string; dryRun?: boolean; maxChars?: string; timeout?: string; drain?: boolean; maxTasks?: string }) => {
+  .option('--pipeline', 'Run agents listed in project.pipeline frontmatter in sequence')
+  .action(async (agentId: string | undefined, opts: { vault?: string; project?: string; dryRun?: boolean; maxChars?: string; timeout?: string; drain?: boolean; maxTasks?: string; pipeline?: boolean }) => {
     const vaultPath = getVaultPath(opts)
     const config = defineConfig({ vaultPath })
     const vault = await scanVault(config)
@@ -218,6 +232,50 @@ program
     const maxTasks = opts.drain ? Number(opts.maxTasks ?? 3) : 1
 
     for (const project of projects) {
+      if (opts.pipeline) {
+        const pipelineIds = project.pipeline
+        if (!pipelineIds || pipelineIds.length === 0) {
+          console.error(`  skip ${project.id}: no pipeline declared in frontmatter`)
+          continue
+        }
+
+        const agents: VaultAgent[] = []
+        for (const id of pipelineIds) {
+          const agent = vault.agents.find(a => a.id === id || a.folderName === id || `@${a.folderName}` === id)
+          if (!agent) {
+            console.error(`  abort ${project.id}: pipeline agent ${id} not found`)
+            break
+          }
+          agents.push(agent)
+        }
+        if (agents.length !== pipelineIds.length) continue
+
+        console.log(`\nPipeline on ${project.id}: ${agents.map(a => a.id).join(' → ')}`)
+        const results = await runPipeline(agents, project, { ...runOpts, dryRun: opts.dryRun ?? false })
+
+        for (let i = 0; i < results.length; i++) {
+          const r = results[i]!
+          const label = agents[i]!.id
+          if (opts.dryRun) {
+            console.log(`\n── ${label} prompt ──\n`)
+            console.log(r.output)
+          } else {
+            console.log(`  ${label}: ${r.success ? `done (${r.durationMs}ms)` : `failed: ${r.error}`}`)
+            if (r.resultado) console.log(`  RESULTADO: ${r.resultado}`)
+          }
+        }
+
+        const allSucceeded = results.every(r => r.success)
+        if (allSucceeded && !opts.dryRun) {
+          await updateProjectStatus(project.filePath, {
+            lastRun: new Date().toISOString(),
+            lastStatus: 'success',
+            runsTotal: project.runsTotal + 1,
+          })
+        }
+        continue
+      }
+
       const resolvedAgentName = agentId
         ? (agentId.startsWith('@') ? agentId : `@${agentId}`)
         : project.agent ?? config.agentDefaults[project.tipo]
@@ -356,6 +414,83 @@ program
       console.log(`  task     ${t.replace(vaultPath + '/', '')}`)
     }
     console.log(`\nDone. ${result.tasksCreated.length} task(s) created.`)
+  })
+
+// ── clockify ──────────────────────────────────────────────────────────────────
+
+const clockifyCmd = program
+  .command('clockify')
+  .description('Sync Clockify deep work hours into vault project frontmatter')
+
+clockifyCmd
+  .command('sync')
+  .description('Fetch time entries and write deepwork stats to project frontmatter')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .option('--days <n>', 'Lookback window in days (default: 7)', '7')
+  .option('--dry-run', 'Show what would be written without modifying files')
+  .action(async (opts: { vault?: string; days?: string; dryRun?: boolean }) => {
+    const clockifyConfig = getClockifyConfig()
+    const vaultPath = getVaultPath(opts)
+    const tavernaConfig = defineConfig({ vaultPath })
+    const days = Number(opts.days ?? 7)
+
+    const to = new Date()
+    const from = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+    const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
+    const vault = await scanVault(tavernaConfig)
+    const [clockifyProjects, entries] = await Promise.all([
+      fetchProjects(clockifyConfig),
+      fetchEntries(clockifyConfig, from, to),
+    ])
+
+    const stats = matchEntries(entries, clockifyProjects, weekStart)
+    let updated = 0
+
+    for (const stat of stats) {
+      const project = vault.projects.find(p => p.id === stat.projectId)
+      if (!project) continue
+      if (opts.dryRun) {
+        console.log(`  ${stat.projectId}: ${stat.totalHours}h total, ${stat.weekHours}h week, last: ${stat.lastEntry}`)
+        continue
+      }
+      await writeDeepWorkToFrontmatter(project.filePath, stat)
+      console.log(`  updated  ${stat.projectId}`)
+      updated++
+    }
+
+    if (!opts.dryRun) {
+      console.log(`\n${updated} project(s) updated`)
+    }
+  })
+
+clockifyCmd
+  .command('status')
+  .description('Show deep work hours per project for the last 7 days')
+  .action(async () => {
+    const clockifyConfig = getClockifyConfig()
+
+    const to = new Date()
+    const from = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
+    const [clockifyProjects, entries] = await Promise.all([
+      fetchProjects(clockifyConfig),
+      fetchEntries(clockifyConfig, from, to),
+    ])
+
+    const stats = matchEntries(entries, clockifyProjects, from)
+
+    if (stats.length === 0) {
+      console.log('No deep work logged in the last 7 days.')
+      return
+    }
+
+    stats.sort((a, b) => b.weekHours - a.weekHours)
+    for (const s of stats) {
+      console.log(`  ${s.projectId.padEnd(24)} ${s.weekHours.toFixed(1)}h`)
+    }
+    const total = stats.reduce((acc, s) => acc + s.weekHours, 0)
+    console.log(`\n  ${'Total'.padEnd(24)} ${total.toFixed(1)}h`)
   })
 
 program.parse()

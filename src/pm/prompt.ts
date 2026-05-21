@@ -45,7 +45,7 @@ This applies to every agent after finishing work on a task:
    \`RESULTADO: <summary of what was done>\`
 `
 
-export function buildPrompt(agent: VaultAgent, project: VaultProject, maxChars: number): string {
+export function buildPrompt(agent: VaultAgent, project: VaultProject, maxChars: number, previousOutput?: string): string {
   const rawTarget = typeof project.raw['target'] === 'string' ? project.raw['target'] : undefined
   const target = rawTarget ? resolveTarget(rawTarget) : undefined
 
@@ -65,6 +65,7 @@ export function buildPrompt(agent: VaultAgent, project: VaultProject, maxChars: 
     '',
     COMPLETION_PROTOCOL,
     '',
+    ...(previousOutput ? ['## Previous Agent Output', '', previousOutput, ''] : []),
   ].join('\n')
 
   // Reserve space for project context

@@ -7,6 +7,10 @@ export interface AgentRunPayload {
   agent: string
   status: LogStatus
   duration_s: number
+  tokens_in?: number
+  tokens_out?: number
+  cache_read?: number
+  cache_fill?: number
 }
 
 type LogPayload = AgentRunPayload

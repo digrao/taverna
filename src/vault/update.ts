@@ -1,10 +1,37 @@
 import { readFile, writeFile } from 'node:fs/promises'
+import { join, dirname, basename } from 'node:path'
 import matter from 'gray-matter'
 
 export interface ProjectStatusUpdate {
   lastRun?: string
   lastStatus: 'success' | 'failed'
   runsTotal: number
+}
+
+export async function updateCompletedTaskSessionId(
+  pendingTaskPaths: string[],
+  sessionId: string,
+): Promise<void> {
+  for (const filePath of pendingTaskPaths) {
+    const archivePath = join(dirname(filePath), 'archive', basename(filePath))
+    let updated = false
+    for (const path of [filePath, archivePath]) {
+      if (updated) break
+      try {
+        const raw = await readFile(path, 'utf8')
+        const parsed = matter(raw)
+        const progresso = parsed.data['progresso'] ?? parsed.data['progress']
+        const done = typeof progresso === 'number'
+          ? progresso >= 100
+          : typeof progresso === 'string' && parseInt(progresso, 10) >= 100
+        if (done) {
+          parsed.data['_session_id'] = sessionId
+          await writeFile(path, matter.stringify(parsed.content, parsed.data), 'utf8')
+          updated = true
+        }
+      } catch { /* file missing or unreadable */ }
+    }
+  }
 }
 
 export async function updateProjectStatus(

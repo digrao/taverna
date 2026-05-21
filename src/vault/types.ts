@@ -50,6 +50,7 @@ export interface BaseProject {
   lastRun?: string
   lastStatus?: 'success' | 'failed'
   runsTotal: number
+  pipeline?: string[]
   tasks: VaultTask[]
   hasTasksFolder: boolean
   hasAssetsFolder: boolean

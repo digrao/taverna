@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join, basename, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
-import { parseFrontmatter, getString, getPriority, getRunEvery } from './frontmatter.js'
+import { parseFrontmatter, getString, getPriority, getRunEvery, getStringArray } from './frontmatter.js'
 import { readProjectTasks } from './task.js'
 import type { VaultProject, ProjectType, RawFrontmatter, USPProject, BBProject, MetaProject } from './types.js'
 
@@ -55,6 +55,7 @@ export async function readProject(
   const priority = getPriority(data, 'priority')
   const runEvery = getRunEvery(data)
   const agent = getString(data, 'agent')
+  const pipelineRaw = getStringArray(data, 'pipeline')
   const lastRun = getString(data, '_last_run')
   const lastStatusRaw = getString(data, '_last_status')
   const lastStatus = lastStatusRaw === 'success' || lastStatusRaw === 'failed' ? lastStatusRaw : undefined
@@ -75,6 +76,7 @@ export async function readProject(
     ...(resolvedFolderPath != null ? { folderPath: resolvedFolderPath } : {}),
     priority,
     ...(agent != null ? { agent } : {}),
+    ...(pipelineRaw.length > 0 ? { pipeline: pipelineRaw } : {}),
     runEvery,
     ...(lastRun != null ? { lastRun } : {}),
     ...(lastStatus != null ? { lastStatus } : {}),

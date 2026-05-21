@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { appendFileSync, writeFileSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { VaultAgent, VaultProject } from '../vault/types.js'
+import { updateCompletedTaskSessionId } from '../vault/update.js'
 import { buildPrompt } from './prompt.js'
 import { log } from './loki.js'
 
@@ -11,6 +13,14 @@ export interface ExecutorOptions {
   timeoutMs?: number
   permissionMode?: string
   dryRun?: boolean
+  previousOutput?: string
+}
+
+export interface TokenUsage {
+  tokensIn: number
+  tokensOut: number
+  cacheRead: number
+  cacheFill: number
 }
 
 export interface AgentResult {
@@ -18,6 +28,8 @@ export interface AgentResult {
   output: string
   resultado?: string
   durationMs: number
+  sessionId?: string
+  usage?: TokenUsage
   error?: string
 }
 
@@ -47,22 +59,46 @@ function killTmuxSession(sessionName: string): void {
   } catch { /* ignore */ }
 }
 
+interface ClaudeJsonResult {
+  text: string
+  usage?: TokenUsage
+}
+
+function parseClaudeJson(raw: string): ClaudeJsonResult {
+  try {
+    const parsed = JSON.parse(raw)
+    const u = parsed?.usage
+    const usage: TokenUsage | undefined = u ? {
+      tokensIn:  u.input_tokens ?? 0,
+      tokensOut: u.output_tokens ?? 0,
+      cacheRead: u.cache_read_input_tokens ?? 0,
+      cacheFill: u.cache_creation_input_tokens ?? 0,
+    } : undefined
+    return usage ? { text: String(parsed?.result ?? raw), usage } : { text: String(parsed?.result ?? raw) }
+  } catch {
+    return { text: raw }
+  }
+}
+
 function spawnClaude(
   prompt: string,
   permissionMode: string,
   timeoutMs: number,
   allowedTools?: string[],
   sessionName?: string,
-): Promise<string> {
-  const args = ['--print', '--permission-mode', permissionMode]
+  sessionId?: string,
+): Promise<ClaudeJsonResult> {
+  const args = ['--print', '--output-format', 'json', '--permission-mode', permissionMode]
   if (allowedTools && allowedTools.length > 0) {
     args.push('--allowedTools', allowedTools.join(','))
   }
+  if (sessionId) {
+    args.push('--session-id', sessionId)
+  }
 
-  // Stream output to a log file so a tmux session can tail it live
   const logFile = sessionName ? join(tmpdir(), `taverna-${sessionName}.log`) : undefined
   if (logFile) {
-    writeFileSync(logFile, '')
+    writeFileSync(logFile, '(waiting for claude...)\n')
     openTmuxSession(sessionName!, logFile)
   }
 
@@ -73,10 +109,7 @@ function spawnClaude(
 
     let stdout = ''
     let stderr = ''
-    proc.stdout.on('data', (d: Buffer) => {
-      stdout += d.toString()
-      if (logFile) appendFileSync(logFile, d)
-    })
+    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
     proc.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
 
     const timer = setTimeout(() => {
@@ -86,14 +119,15 @@ function spawnClaude(
 
     proc.on('close', code => {
       clearTimeout(timer)
-      if (sessionName) {
-        // Small delay so the user can see the last lines before the session closes
+      const parsed = parseClaudeJson(stdout)
+      if (logFile) {
+        try { writeFileSync(logFile, parsed.text) } catch { /* ignore */ }
         setTimeout(() => {
-          killTmuxSession(sessionName)
-          if (logFile) try { unlinkSync(logFile) } catch { /* ignore */ }
+          killTmuxSession(sessionName!)
+          try { unlinkSync(logFile) } catch { /* ignore */ }
         }, 3000)
       }
-      if (code === 0) resolve(stdout)
+      if (code === 0) resolve(parsed)
       else reject(new Error(`claude exited with code ${code}: ${stderr.slice(0, 200)}`))
     })
 
@@ -101,6 +135,27 @@ function spawnClaude(
     proc.stdin.write(prompt)
     proc.stdin.end()
   })
+}
+
+export async function runPipeline(
+  agents: VaultAgent[],
+  project: VaultProject,
+  opts?: ExecutorOptions,
+): Promise<AgentResult[]> {
+  const results: AgentResult[] = []
+  let previousOutput: string | undefined
+
+  for (const agent of agents) {
+    const result = await runAgent(agent, project, {
+      ...opts,
+      ...(previousOutput !== undefined ? { previousOutput } : {}),
+    })
+    results.push(result)
+    if (!result.success) break
+    previousOutput = result.output
+  }
+
+  return results
 }
 
 export async function runAgent(
@@ -114,7 +169,7 @@ export async function runAgent(
   const permissionMode = opts?.permissionMode ?? (agent.permissions ? 'default' : 'bypassPermissions')
   const allowedTools = agent.permissions
 
-  const prompt = buildPrompt(agent, project, maxContextChars)
+  const prompt = buildPrompt(agent, project, maxContextChars, opts?.previousOutput)
 
   if (opts?.dryRun) {
     return { success: true, output: prompt, durationMs: 0 }
@@ -125,17 +180,30 @@ export async function runAgent(
 
   // tmux session name: taverna-dev-agent-taverna (visible via `tmux ls`)
   const sessionName = `taverna-${agentLabel.replace('@', '')}-${projectLabel}`
+  const sessionId = randomUUID()
+  const pendingTaskPaths = project.tasks
+    .filter(t => t.progresso < 100)
+    .map(t => t.filePath)
 
   const start = Date.now()
   try {
-    const output = await spawnClaude(prompt, permissionMode, timeoutMs, allowedTools, sessionName)
+    const { text, usage } = await spawnClaude(prompt, permissionMode, timeoutMs, allowedTools, sessionName, sessionId)
     const durationMs = Date.now() - start
-    const resultado = parseResultado(output)
-    log({ event: 'agent_run', project: projectLabel, agent: agentLabel, status: 'success', duration_s: Math.round(durationMs / 100) / 10 })
+    const resultado = parseResultado(text)
+    if (pendingTaskPaths.length > 0) {
+      await updateCompletedTaskSessionId(pendingTaskPaths, sessionId)
+    }
+    log({
+      event: 'agent_run', project: projectLabel, agent: agentLabel, status: 'success',
+      duration_s: Math.round(durationMs / 100) / 10,
+      ...(usage ? { tokens_in: usage.tokensIn, tokens_out: usage.tokensOut, cache_read: usage.cacheRead, cache_fill: usage.cacheFill } : {}),
+    })
     return {
       success: true,
-      output,
+      output: text,
       durationMs,
+      sessionId,
+      ...(usage ? { usage } : {}),
       ...(resultado !== undefined ? { resultado } : {}),
     }
   } catch (e) {
