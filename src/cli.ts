@@ -4,10 +4,14 @@ import { join } from 'node:path'
 import { morning } from './morning/index.js'
 import { defineConfig } from './config.js'
 import { storeAssets, pullAssets, statusAssets } from './assets/index.js'
-import { scanVault, appendLogbook, updateProjectStatus } from './vault/index.js'
+import { scanVault, appendLogbook, updateProjectStatus, readProject } from './vault/index.js'
 import { runAgent } from './pm/executor.js'
 import { processInbox, MAX_CHARS_PER_RUN } from './inbox/index.js'
 import { migrate } from './migrate/index.js'
+
+import type { VaultAgent, VaultProject } from './vault/index.js'
+import type { TavernaConfig } from './config.js'
+import type { ExecutorOptions } from './pm/executor.js'
 
 function getVaultPath(opts: { vault?: string }): string {
   const vaultPath = opts.vault ?? process.env['VAULT_PATH']
@@ -22,6 +26,67 @@ function fmtSize(bytes: number): string {
   if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`
   if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(0)} KB`
   return `${bytes} B`
+}
+
+async function runOnce(
+  agent: VaultAgent,
+  project: VaultProject,
+  runOpts: ExecutorOptions,
+  config: TavernaConfig,
+  dryRun: boolean,
+): Promise<{ success: boolean }> {
+  const result = await runAgent(agent, project, runOpts)
+
+  if (dryRun) {
+    console.log(result.output)
+    return { success: true }
+  }
+
+  await updateProjectStatus(project.filePath, {
+    lastRun: new Date().toISOString(),
+    lastStatus: result.success ? 'success' : 'failed',
+    runsTotal: project.runsTotal + 1,
+  })
+  await appendLogbook(agent.id, {
+    projectName: project.id,
+    content: [
+      `**Success:** ${result.success}`,
+      `**Duration:** ${(result.durationMs / 1000).toFixed(1)}s`,
+      ...(result.resultado ? [`**Resultado:** ${result.resultado}`] : []),
+      ...(result.error ? [`**Error:** ${result.error}`] : []),
+    ].join('\n'),
+    success: result.success,
+    duration: result.durationMs / 1000,
+  }, config)
+
+  console.log(result.success ? `  done (${result.durationMs}ms)` : `  failed: ${result.error}`)
+  if (result.resultado) console.log(`  RESULTADO: ${result.resultado}`)
+  return { success: result.success }
+}
+
+// Runs up to maxTasks agent iterations on a project, re-reading state between each.
+async function drainProject(
+  agent: VaultAgent,
+  project: VaultProject,
+  maxTasks: number,
+  runOpts: ExecutorOptions,
+  config: TavernaConfig,
+  dryRun: boolean,
+): Promise<void> {
+  let current = project
+  for (let i = 0; i < maxTasks; i++) {
+    const pending = current.tasks.filter(t => t.progresso < 100)
+    if (pending.length === 0) {
+      console.log(`  no pending tasks remaining`)
+      break
+    }
+    if (maxTasks > 1) console.log(`  [${i + 1}/${maxTasks}] ${pending[0]!.id}`)
+    const { success } = await runOnce(agent, current, runOpts, config, dryRun)
+    if (!success || dryRun) break
+    if (i < maxTasks - 1) {
+      current = await readProject(current.filePath, config.uspFolderPrefixes)
+    }
+  }
 }
 
 const program = new Command('taverna')
@@ -123,12 +188,13 @@ program
   .option('--dry-run', 'Print the prompt without executing')
   .option('--max-chars <n>', 'Max context chars', '8000')
   .option('--timeout <ms>', 'Agent timeout in ms', '600000')
-  .action(async (agentId: string | undefined, opts: { vault?: string; project?: string; dryRun?: boolean; maxChars?: string; timeout?: string }) => {
+  .option('--drain', 'Run tasks sequentially until done or --max-tasks is reached')
+  .option('--max-tasks <n>', 'Max tasks per drain session (default: 3)', '3')
+  .action(async (agentId: string | undefined, opts: { vault?: string; project?: string; dryRun?: boolean; maxChars?: string; timeout?: string; drain?: boolean; maxTasks?: string }) => {
     const vaultPath = getVaultPath(opts)
     const config = defineConfig({ vaultPath })
     const vault = await scanVault(config)
 
-    // Resolve which projects to run on
     const projects = opts.project
       ? vault.projects.filter(p => p.id === opts.project || p.name === opts.project)
       : agentId
@@ -144,8 +210,13 @@ program
       process.exit(1)
     }
 
+    const runOpts: ExecutorOptions = {
+      ...(opts.maxChars ? { maxContextChars: Number(opts.maxChars) } : {}),
+      ...(opts.timeout ? { timeoutMs: Number(opts.timeout) } : {}),
+    }
+    const maxTasks = opts.drain ? Number(opts.maxTasks ?? 3) : 1
+
     for (const project of projects) {
-      // Agent resolution order: CLI arg → project.agent → tipo default
       const resolvedAgentName = agentId
         ? (agentId.startsWith('@') ? agentId : `@${agentId}`)
         : project.agent ?? config.agentDefaults[project.tipo]
@@ -161,36 +232,8 @@ program
         continue
       }
 
-      console.log(`\nRunning ${agent.id} on ${project.id}…`)
-      const result = await runAgent(agent, project, {
-        ...(opts.dryRun ? { dryRun: true as const } : {}),
-        ...(opts.maxChars ? { maxContextChars: Number(opts.maxChars) } : {}),
-        ...(opts.timeout ? { timeoutMs: Number(opts.timeout) } : {}),
-      })
-      if (opts.dryRun) {
-        console.log(result.output)
-      } else {
-        const lastStatus = result.success ? 'success' : 'failed'
-        const now = new Date().toISOString()
-        await updateProjectStatus(project.filePath, {
-          lastRun: now,
-          lastStatus,
-          runsTotal: project.runsTotal + 1,
-        })
-        await appendLogbook(agent.id, {
-          projectName: project.id,
-          content: [
-            `**Success:** ${result.success}`,
-            `**Duration:** ${(result.durationMs / 1000).toFixed(1)}s`,
-            ...(result.resultado ? [`**Resultado:** ${result.resultado}`] : []),
-            ...(result.error ? [`**Error:** ${result.error}`] : []),
-          ].join('\n'),
-          success: result.success,
-          duration: result.durationMs / 1000,
-        }, config)
-        console.log(result.success ? `  done (${result.durationMs}ms)` : `  failed: ${result.error}`)
-        if (result.resultado) console.log(`  RESULTADO: ${result.resultado}`)
-      }
+      console.log(`\nRunning ${agent.id} on ${project.id}${maxTasks > 1 ? ` (drain ≤${maxTasks} tasks)` : ''}…`)
+      await drainProject(agent, project, maxTasks, runOpts, config, opts.dryRun ?? false)
     }
   })
 
@@ -201,7 +244,9 @@ program
   .description('Run agents on all eligible projects')
   .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
   .option('--dry-run', 'Print prompts without executing')
-  .action(async (opts: { vault?: string; dryRun?: boolean }) => {
+  .option('--drain', 'Run tasks sequentially per project until done or --max-tasks is reached')
+  .option('--max-tasks <n>', 'Max tasks per project per drain session (default: 3)', '3')
+  .action(async (opts: { vault?: string; dryRun?: boolean; drain?: boolean; maxTasks?: string }) => {
     const vaultPath = getVaultPath(opts)
     const config = defineConfig({ vaultPath })
     const vault = await scanVault(config)
@@ -227,40 +272,17 @@ program
       return
     }
 
+    const maxTasks = opts.drain ? Number(opts.maxTasks ?? 3) : 1
+
     for (const project of eligible) {
-      const agent = vault.agents.find(a => a.id === project.agent || a.folderName === project.agent)
+      const resolvedAgentName = project.agent ?? config.agentDefaults[project.tipo]
+      const agent = vault.agents.find(a => a.id === resolvedAgentName || a.folderName === resolvedAgentName)
       if (!agent) {
-        console.error(`  skip ${project.id}: agent ${project.agent} not found`)
+        console.error(`  skip ${project.id}: agent ${resolvedAgentName} not found`)
         continue
       }
-      console.log(`\n${project.id} → ${agent.id}`)
-      const result = await runAgent(agent, project, { ...(opts.dryRun ? { dryRun: true as const } : {}) })
-      if (!opts.dryRun) {
-        const lastStatus = result.success ? 'success' : 'failed'
-        const now = new Date().toISOString()
-        await updateProjectStatus(project.filePath, {
-          lastRun: now,
-          lastStatus,
-          runsTotal: project.runsTotal + 1,
-        })
-        await appendLogbook(agent.id, {
-          projectName: project.id,
-          content: [
-            `**Success:** ${result.success}`,
-            `**Duration:** ${(result.durationMs / 1000).toFixed(1)}s`,
-            ...(result.resultado ? [`**Resultado:** ${result.resultado}`] : []),
-            ...(result.error ? [`**Error:** ${result.error}`] : []),
-          ].join('\n'),
-          success: result.success,
-          duration: result.durationMs / 1000,
-        }, config)
-      }
-      if (opts.dryRun) {
-        console.log(result.output)
-      } else {
-        console.log(result.success ? `  done (${result.durationMs}ms)` : `  failed: ${result.error}`)
-        if (result.resultado) console.log(`  RESULTADO: ${result.resultado}`)
-      }
+      console.log(`\n${project.id} → ${agent.id}${maxTasks > 1 ? ` (drain ≤${maxTasks} tasks)` : ''}`)
+      await drainProject(agent, project, maxTasks, {}, config, opts.dryRun ?? false)
     }
   })
 

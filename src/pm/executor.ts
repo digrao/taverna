@@ -83,8 +83,6 @@ export async function runAgent(
   const agentLabel = agent.id
   const projectLabel = project.id
 
-  log({ event: 'agent_start', project: projectLabel, agent: agentLabel })
-
   const start = Date.now()
   try {
     const output = await spawnClaude(prompt, permissionMode, timeoutMs, allowedTools)

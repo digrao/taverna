@@ -1,11 +1,5 @@
-export type LogEvent = 'agent_start' | 'agent_run'
+export type LogEvent = 'agent_run'
 export type LogStatus = 'success' | 'failed'
-
-export interface AgentStartPayload {
-  event: 'agent_start'
-  project: string
-  agent: string
-}
 
 export interface AgentRunPayload {
   event: 'agent_run'
@@ -15,7 +9,7 @@ export interface AgentRunPayload {
   duration_s: number
 }
 
-type LogPayload = AgentStartPayload | AgentRunPayload
+type LogPayload = AgentRunPayload
 
 export function log(payload: LogPayload): void {
   process.stdout.write(JSON.stringify({ ts: new Date().toISOString(), ...payload }) + '\n')
