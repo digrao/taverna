@@ -29,28 +29,28 @@ const mockProject: VaultProject = {
 // ── buildPrompt ───────────────────────────────────────────────────────────────
 
 describe('buildPrompt', () => {
-  it('includes project ID and directive text', () => {
-    const prompt = buildPrompt(mockAgent, mockProject, 8000)
+  it('includes project ID and directive text', async () => {
+    const prompt = await buildPrompt(mockAgent, mockProject, 8000)
     expect(prompt).toContain('TEST001')
     expect(prompt).toContain('You are a test agent')
   })
 
-  it('truncates project content when maxChars is tight', () => {
+  it('truncates project content when maxChars is tight', async () => {
     // The static sections (header + protocol) are always included.
     // What gets truncated is project.content — verify it shrinks with a tighter budget.
-    const promptLarge = buildPrompt(mockAgent, mockProject, 8000)
-    const promptSmall = buildPrompt(mockAgent, mockProject, 2000)
+    const promptLarge = await buildPrompt(mockAgent, mockProject, 8000)
+    const promptSmall = await buildPrompt(mockAgent, mockProject, 2000)
     expect(promptSmall.length).toBeLessThan(promptLarge.length)
     expect(promptSmall.length).toBeLessThanOrEqual(8000)
   })
 
-  it('includes project type in header', () => {
-    const prompt = buildPrompt(mockAgent, mockProject, 8000)
+  it('includes project type in header', async () => {
+    const prompt = await buildPrompt(mockAgent, mockProject, 8000)
     expect(prompt).toContain('**Type:** *')
   })
 
-  it('truncates at 0 available chars without crashing', () => {
-    const prompt = buildPrompt(mockAgent, mockProject, 1)
+  it('truncates at 0 available chars without crashing', async () => {
+    const prompt = await buildPrompt(mockAgent, mockProject, 1)
     expect(prompt.length).toBeGreaterThan(0)
   })
 })
@@ -105,14 +105,14 @@ describe('runAgent', () => {
 // ── buildPrompt with previousOutput ──────────────────────────────────────────
 
 describe('buildPrompt previousOutput', () => {
-  it('includes previous output section when provided', () => {
-    const prompt = buildPrompt(mockAgent, mockProject, 8000, 'prior step result')
+  it('includes previous output section when provided', async () => {
+    const prompt = await buildPrompt(mockAgent, mockProject, 8000, 'prior step result')
     expect(prompt).toContain('## Previous Agent Output')
     expect(prompt).toContain('prior step result')
   })
 
-  it('omits previous output section when not provided', () => {
-    const prompt = buildPrompt(mockAgent, mockProject, 8000)
+  it('omits previous output section when not provided', async () => {
+    const prompt = await buildPrompt(mockAgent, mockProject, 8000)
     expect(prompt).not.toContain('## Previous Agent Output')
   })
 })
