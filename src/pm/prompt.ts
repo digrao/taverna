@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
 import type { VaultProject, VaultAgent, VaultTask } from '../vault/types.js'
+import { isBlocked } from '../vault/task.js'
 
 const MODE_MAP: Record<string, string> = {
   vhdl: 'vhdl.md',
@@ -91,7 +92,10 @@ export async function buildPrompt(agent: VaultAgent, project: VaultProject, maxC
   const rawTarget = typeof project.raw['target'] === 'string' ? project.raw['target'] : undefined
   const target = rawTarget ? resolveTarget(rawTarget) : undefined
 
-  const pending = project.tasks.filter(t => t.progresso < 100)
+  const allTasks = project.tasks
+  const pending = allTasks
+    .filter(t => t.progresso < 100)
+    .filter(t => !isBlocked(t, allTasks).blocked)
   const directiveText = await resolveDirectiveText(agent, pending[0])
 
   const meta = [

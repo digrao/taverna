@@ -680,6 +680,54 @@ program
     console.log(`\n${hr}`)
   })
 
+// ── status ────────────────────────────────────────────────────────────────────
+
+program
+  .command('status')
+  .description('Show task dependency status for a project')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .option('--project <id>', 'Project ID (required)')
+  .action(async (opts: { vault?: string; project?: string }) => {
+    const { isBlocked, hasCycle, resolveDependency } = await import('./vault/task.js')
+
+    if (!opts.project) {
+      console.error('Error: --project <id> is required')
+      process.exit(1)
+    }
+
+    const vaultPath = getVaultPath(opts)
+    const config = defineConfig({ vaultPath })
+    const vault = await scanVault(config)
+
+    const project = vault.projects.find(p => p.id === opts.project || p.name === opts.project)
+    if (!project) {
+      console.error(`Project not found: ${opts.project}`)
+      process.exit(1)
+    }
+
+    const tasks = project.tasks
+    const cycle = hasCycle(tasks)
+    if (cycle) {
+      console.error('  warn: circular dependency detected')
+    }
+
+    for (const task of tasks) {
+      const pct = String(task.progresso).padStart(3, ' ')
+      const { blocked, blockedBy } = isBlocked(task, tasks)
+
+      if (!blocked) {
+        console.log(`${task.filePath.replace(vaultPath + '/', '')}  [${pct}%] ✓`)
+      } else {
+        const depList = (task.depends ?? []).map(depId => {
+          const dep = resolveDependency(depId, tasks)
+          const ok = dep === undefined || dep.progresso === 100
+          return `${depId} ${ok ? '✓' : '✗'}`
+        }).join(', ')
+        console.log(`${task.filePath.replace(vaultPath + '/', '')}  [${pct}%] BLOCKED por: ${depList}`)
+      }
+    }
+  })
+
 // ── usp-board ─────────────────────────────────────────────────────────────────
 
 program

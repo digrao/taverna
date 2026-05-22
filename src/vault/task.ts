@@ -47,6 +47,8 @@ export async function readProjectTasks(projectFolderPath: string): Promise<Vault
     const bloqueio = getString(data, 'bloqueio')
     const bloqueioDetalhe = getString(data, 'bloqueio_detalhe')
 
+    const depends = getStringArray(data, 'depende').filter(Boolean)
+
     tasks.push({
       id: basename(file, '.md'),
       filePath,
@@ -58,6 +60,7 @@ export async function readProjectTasks(projectFolderPath: string): Promise<Vault
       ...(requerHumano.length > 0 ? { requerHumano } : {}),
       ...(bloqueio !== undefined ? { bloqueio } : {}),
       ...(bloqueioDetalhe !== undefined ? { bloqueioDetalhe } : {}),
+      ...(depends.length > 0 ? { depends } : {}),
       state: deriveTaskState(progresso, data),
       body: content.trim(),
       raw: data,
@@ -65,4 +68,58 @@ export async function readProjectTasks(projectFolderPath: string): Promise<Vault
   }
 
   return tasks.sort((a, b) => PRIORITY_ORDER[a.prioridade] - PRIORITY_ORDER[b.prioridade])
+}
+
+// Resolves a dep ID ("07" or "07-scheduler-module") to a task from allTasks.
+// An archived (not in allTasks) dep returns undefined — treated as satisfied by the caller.
+export function resolveDependency(depId: string, allTasks: VaultTask[]): VaultTask | undefined {
+  return allTasks.find(t => t.id === depId || t.id.startsWith(depId + '-'))
+}
+
+export interface BlockedInfo {
+  blocked: boolean
+  blockedBy: string[]  // dep IDs that are not yet at 100%
+}
+
+// A task is blocked if any of its declared deps is found in allTasks with progresso < 100.
+// Deps not found in allTasks are assumed satisfied (archived/completed).
+export function isBlocked(task: VaultTask, allTasks: VaultTask[]): BlockedInfo {
+  if (!task.depends || task.depends.length === 0) return { blocked: false, blockedBy: [] }
+  const blockedBy: string[] = []
+  for (const depId of task.depends) {
+    const dep = resolveDependency(depId, allTasks)
+    if (dep !== undefined && dep.progresso < 100) {
+      blockedBy.push(depId)
+    }
+  }
+  return { blocked: blockedBy.length > 0, blockedBy }
+}
+
+function dfs(taskId: string, taskMap: Map<string, VaultTask>, visited: Set<string>, stack: Set<string>): boolean {
+  visited.add(taskId)
+  stack.add(taskId)
+  const task = taskMap.get(taskId)
+  for (const depId of task?.depends ?? []) {
+    const dep = resolveDependency(depId, [...taskMap.values()])
+    if (!dep) continue
+    if (!visited.has(dep.id)) {
+      if (dfs(dep.id, taskMap, visited, stack)) return true
+    } else if (stack.has(dep.id)) {
+      return true
+    }
+  }
+  stack.delete(taskId)
+  return false
+}
+
+export function hasCycle(tasks: VaultTask[]): boolean {
+  const taskMap = new Map(tasks.map(t => [t.id, t]))
+  const visited = new Set<string>()
+  const stack = new Set<string>()
+  for (const t of tasks) {
+    if (!visited.has(t.id)) {
+      if (dfs(t.id, taskMap, visited, stack)) return true
+    }
+  }
+  return false
 }

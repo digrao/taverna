@@ -4,6 +4,7 @@ import { appendFileSync, writeFileSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { VaultAgent, VaultProject } from '../vault/types.js'
+import { isBlocked, hasCycle } from '../vault/task.js'
 import { updateCompletedTaskSessionId } from '../vault/update.js'
 import { buildPrompt } from './prompt.js'
 import { parseActionRequired } from '../inbox/action.js'
@@ -173,14 +174,28 @@ export async function runAgent(
   const permissionMode = opts?.permissionMode ?? policy.permissionMode
   const allowedTools = policy.allowedTools
 
+  const agentLabel = agent.id
+  const projectLabel = project.id
+
+  if (hasCycle(project.tasks)) {
+    log({ event: 'agent_run', project: projectLabel, agent: agentLabel, status: 'failed', duration_s: 0 })
+    return { success: false, output: '', durationMs: 0, error: 'BLOCKED: circular dependency detected' }
+  }
+
+  const allPending = project.tasks.filter(t => t.progresso < 100)
+  if (allPending.length > 0) {
+    const unblocked = allPending.filter(t => !isBlocked(t, project.tasks).blocked)
+    if (unblocked.length === 0) {
+      log({ event: 'agent_run', project: projectLabel, agent: agentLabel, status: 'failed', duration_s: 0 })
+      return { success: false, output: '', durationMs: 0, error: 'BLOCKED: all pending tasks have unsatisfied dependencies' }
+    }
+  }
+
   const prompt = await buildPrompt(agent, project, maxContextChars, opts?.previousOutput)
 
   if (opts?.dryRun) {
     return { success: true, output: prompt, durationMs: 0 }
   }
-
-  const agentLabel = agent.id
-  const projectLabel = project.id
 
   // tmux session name: taverna-dev-agent-taverna (visible via `tmux ls`)
   const sessionName = `taverna-${agentLabel.replace('@', '')}-${projectLabel}`

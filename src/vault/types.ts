@@ -27,6 +27,8 @@ export interface VaultTask {
   // Bloqueio técnico detectado pelo agente
   bloqueio?: string
   bloqueioDetalhe?: string
+  // Dependency IDs from `depende:` frontmatter field
+  depends?: string[]
   body: string
   raw: RawFrontmatter
 }
