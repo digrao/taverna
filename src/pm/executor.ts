@@ -5,11 +5,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { VaultAgent, VaultProject } from '../vault/types.js'
 import { isBlocked, hasCycle } from '../vault/task.js'
-import { updateCompletedTaskSessionId } from '../vault/update.js'
+import { updateCompletedTaskSessionId, markTasksInProgress } from '../vault/update.js'
 import { buildPrompt } from './prompt.js'
 import { parseActionRequired } from '../inbox/action.js'
 import { log } from './loki.js'
 import { resolvePolicy } from './policy-resolver.js'
+import { checkBudget, recordCost } from './budget.js'
+import { matrixConfigFromEnv, sendMatrixMessage, formatAgentRunMessage, formatActionRequiredMessage } from './matrix.js'
+import { markActive, markInactive } from './active.js'
 
 export interface ExecutorOptions {
   maxContextChars?: number
@@ -17,6 +20,7 @@ export interface ExecutorOptions {
   permissionMode?: string
   dryRun?: boolean
   previousOutput?: string
+  vaultPath?: string
 }
 
 export interface TokenUsage {
@@ -191,6 +195,22 @@ export async function runAgent(
     }
   }
 
+  // Budget check — read limit from project frontmatter (budget_usd_daily)
+  const vaultPath = opts?.vaultPath
+  if (vaultPath) {
+    const limitUsd = typeof project.raw['budget_usd_daily'] === 'number'
+      ? project.raw['budget_usd_daily'] as number
+      : undefined
+    const budget = checkBudget(vaultPath, projectLabel, limitUsd)
+    if (!budget.allowed) {
+      log({ event: 'agent_run', project: projectLabel, agent: agentLabel, status: 'failed', duration_s: 0 })
+      return {
+        success: false, output: '', durationMs: 0,
+        error: `BUDGET: limite diário atingido ($${budget.spent.toFixed(4)} / $${budget.limit?.toFixed(2)})`,
+      }
+    }
+  }
+
   const prompt = await buildPrompt(agent, project, maxContextChars, opts?.previousOutput)
 
   if (opts?.dryRun) {
@@ -204,6 +224,13 @@ export async function runAgent(
     .filter(t => t.progresso < 100)
     .map(t => t.filePath)
 
+  // Write session ID to pending tasks now so the user can resume with
+  // `claude --resume <_session_id>` if the agent requests intervention.
+  if (pendingTaskPaths.length > 0) {
+    await markTasksInProgress(pendingTaskPaths, sessionId)
+  }
+
+  markActive({ project: projectLabel, agent: agentLabel, sessionId, startedAt: new Date().toISOString() })
   const start = Date.now()
   try {
     const { text, usage } = await spawnClaude(prompt, permissionMode, timeoutMs, allowedTools, sessionName, sessionId)
@@ -227,6 +254,23 @@ export async function runAgent(
       ...(cost_usd !== undefined ? { cost_usd } : {}),
       ...(cache_hit_pct !== undefined ? { cache_hit_pct } : {}),
     })
+
+    markInactive(projectLabel)
+
+    // Record cost in ledger
+    if (vaultPath && cost_usd !== undefined) {
+      try { recordCost(vaultPath, projectLabel, agentLabel, cost_usd) } catch { /* non-fatal */ }
+    }
+
+    // Matrix notification on ACTION_REQUIRED or completion
+    const matrixCfg = matrixConfigFromEnv()
+    if (matrixCfg) {
+      const msg = actionRequired
+        ? formatActionRequiredMessage(projectLabel, agentLabel, actionRequired, sessionId)
+        : formatAgentRunMessage(projectLabel, agentLabel, resultado, sessionId)
+      sendMatrixMessage(matrixCfg, msg).catch(() => { /* non-fatal */ })
+    }
+
     return {
       success: true,
       output: text,
@@ -237,6 +281,7 @@ export async function runAgent(
       ...(actionRequired !== undefined ? { actionRequired } : {}),
     }
   } catch (e) {
+    markInactive(projectLabel)
     const durationMs = Date.now() - start
     log({ event: 'agent_run', project: projectLabel, agent: agentLabel, status: 'failed', duration_s: Math.round(durationMs / 100) / 10 })
     return {

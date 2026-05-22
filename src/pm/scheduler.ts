@@ -131,7 +131,7 @@ export async function runScheduler(
           continue
         }
 
-        const result = await runAgent(agent, project, {})
+        const result = await runAgent(agent, project, { vaultPath: config.vaultPath })
         anySuccess = anySuccess || result.success
 
         await appendLogbook(agent.id, {

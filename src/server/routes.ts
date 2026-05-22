@@ -1,11 +1,18 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join, basename } from 'node:path'
 import { existsSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { VaultCache } from './cache.js'
 import type { TavernaConfig } from '../config.js'
 import { parseFrontmatter, getString } from '../vault/frontmatter.js'
 import { findBacklinks } from '../vault/backlinks.js'
+import { watch } from 'node:fs'
+import { getDailyCosts } from '../pm/budget.js'
+import { computeHealth } from '../pm/loki.js'
+import { getActiveRuns, activeDir } from '../pm/active.js'
+import { renderDashboard } from './dashboard.js'
+import { renderFlow } from './flow.js'
 
 type SSEClient = ServerResponse
 
@@ -17,6 +24,17 @@ export class Router {
     private config: TavernaConfig,
   ) {
     cache.onRefresh = () => this.broadcast('update')
+
+    // Watch /tmp/taverna-active/ and broadcast agent_active events when runs start/stop
+    try {
+      watch(activeDir(), () => {
+        const runs = getActiveRuns()
+        const msg = `event: agent_active\ndata: ${JSON.stringify(runs)}\n\n`
+        for (const client of this.sseClients) {
+          try { client.write(msg) } catch { this.sseClients.delete(client) }
+        }
+      })
+    } catch { /* non-fatal if watch fails */ }
   }
 
   private json(res: ServerResponse, data: unknown, status = 200): void {
@@ -35,7 +53,18 @@ export class Router {
   async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', `http://localhost`)
     const path = url.pathname
+    const method = req.method ?? 'GET'
 
+    if (path === '/dashboard') return this.handleDashboard(req, res)
+    if (path === '/flow') return this.handleFlow(req, res)
+    if (path === '/api/active') return this.handleApiActive(req, res)
+    if (path === '/api/state') return this.handleApiState(req, res)
+    if (path === '/api/costs') return this.handleApiCosts(req, res)
+    if (method === 'POST' && path === '/api/run') return this.handleRun(req, res, [])
+    if (method === 'POST' && path === '/api/drain') return this.handleRun(req, res, ['--drain'])
+    if (method === 'POST' && path.startsWith('/api/run/')) {
+      return this.handleRun(req, res, ['--project', decodeURIComponent(path.slice(9))])
+    }
     if (path === '/status') return this.handleStatus(req, res)
     if (path === '/projects') return this.handleProjects(req, res)
     if (path.startsWith('/projects/')) return this.handleProject(req, res, path.slice(10))
@@ -97,6 +126,55 @@ export class Router {
     const notePath = note.startsWith('/') ? note : join(this.config.vaultPath, note)
     const results = await findBacklinks(this.config.vaultPath, notePath)
     this.json(res, { note, count: results.length, backlinks: results })
+  }
+
+  private async handleDashboard(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const state = await this.cache.get()
+    const costs = getDailyCosts(this.config.vaultPath)
+    const html = renderDashboard(state.projects, costs)
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end(html)
+  }
+
+  private handleApiActive(_req: IncomingMessage, res: ServerResponse): void {
+    this.json(res, getActiveRuns())
+  }
+
+  private async handleFlow(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const state = await this.cache.get()
+    const html = renderFlow(state.projects)
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end(html)
+  }
+
+  private async handleApiState(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const state = await this.cache.get()
+    const costs = getDailyCosts(this.config.vaultPath)
+    const projects = state.projects.map(p => ({
+      ...p,
+      health: computeHealth(p),
+      cost_today: costs[p.id] ?? 0,
+    }))
+    this.json(res, { scannedAt: state.scannedAt, projects, costs })
+  }
+
+  private handleApiCosts(_req: IncomingMessage, res: ServerResponse): void {
+    const costs = getDailyCosts(this.config.vaultPath)
+    const total = Object.values(costs).reduce((s, v) => s + v, 0)
+    this.json(res, { date: new Date().toISOString().slice(0, 10), costs, total })
+  }
+
+  private handleRun(_req: IncomingMessage, res: ServerResponse, extraArgs: string[]): void {
+    const proc = spawn('taverna', ['execute', ...extraArgs], {
+      stdio: 'ignore',
+      detached: true,
+      env: { ...process.env },
+    })
+    proc.unref()
+    const drain = extraArgs.includes('--drain')
+    const project = extraArgs.includes('--project') ? extraArgs[extraArgs.indexOf('--project') + 1] : undefined
+    const label = project ? `projeto ${project}` : drain ? 'drain' : 'execute'
+    this.json(res, { started: true, message: `taverna ${label} iniciado` })
   }
 
   private async handleInbox(_req: IncomingMessage, res: ServerResponse): Promise<void> {

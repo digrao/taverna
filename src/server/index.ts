@@ -25,7 +25,9 @@ export function createServer(config: TavernaConfig, opts: ServeOptions = {}): Se
 
   server.listen(port, () => {
     console.log(`taverna serve  http://localhost:${port}`)
-    console.log(`  GET /status | /projects | /projects/:id | /agents | /events | /inbox`)
+    console.log(`  GET  /dashboard | /api/state | /api/costs | /events`)
+    console.log(`  POST /api/run   | /api/drain | /api/run/:id`)
+    console.log(`  GET  /status | /projects | /projects/:id | /agents | /inbox`)
   })
 
   return server

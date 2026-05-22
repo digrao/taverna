@@ -56,7 +56,7 @@ async function runOnce(
   config: TavernaConfig,
   dryRun: boolean,
 ): Promise<{ success: boolean }> {
-  const result = await runAgent(agent, project, runOpts)
+  const result = await runAgent(agent, project, { ...runOpts, vaultPath: config.vaultPath })
 
   if (dryRun) {
     console.log(result.output)
@@ -284,6 +284,7 @@ program
     const runOpts: ExecutorOptions = {
       ...(opts.maxChars ? { maxContextChars: Number(opts.maxChars) } : {}),
       ...(opts.timeout ? { timeoutMs: Number(opts.timeout) } : {}),
+      vaultPath: config.vaultPath,
     }
     const maxTasks = opts.drain ? Number(opts.maxTasks ?? 3) : 1
 
