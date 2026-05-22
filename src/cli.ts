@@ -7,6 +7,7 @@ import { storeAssets, pullAssets, statusAssets } from './assets/index.js'
 import { scanVault, appendLogbook, appendProjectLogbook, updateProjectStatus, readProject } from './vault/index.js'
 import { runAgent, runPipeline } from './pm/executor.js'
 import { snapshot, computeHealth } from './pm/loki.js'
+import { emitEvent } from './pm/event-bus.js'
 import { updateBoardFile } from './usp/board.js'
 import { writeActionRequest } from './inbox/action.js'
 import type { ActionUrgency } from './inbox/action.js'
@@ -1012,6 +1013,30 @@ program
       await writeFile(join(vaultPath, 'STATUS.md'), markdown, 'utf8')
       console.log(`  written  STATUS.md  (${vault.projects.length} projects)`)
     }
+  })
+
+// ── insights ──────────────────────────────────────────────────────────────────
+
+program
+  .command('insights')
+  .description('Emit a vault_snapshot event with inbox/zettelkasten/projects counts')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .action(async (opts: { vault?: string }) => {
+    const { readdir } = await import('node:fs/promises')
+    const vaultPath = getVaultPath(opts)
+
+    const [inboxEntries, zettelEntries, projectEntries] = await Promise.all([
+      readdir(join(vaultPath, '00_Inbox'), { withFileTypes: true }),
+      readdir(join(vaultPath, '00_Zettelkasten'), { withFileTypes: true }),
+      readdir(join(vaultPath, '10_Projects'), { withFileTypes: true }),
+    ])
+
+    emitEvent({
+      event: 'vault_snapshot',
+      inbox: inboxEntries.filter(e => e.isFile()).length,
+      zettelkasten: zettelEntries.filter(e => e.isFile()).length,
+      projects: projectEntries.filter(e => e.isDirectory()).length,
+    })
   })
 
 // ── serve ─────────────────────────────────────────────────────────────────────
