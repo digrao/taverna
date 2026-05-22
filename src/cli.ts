@@ -558,6 +558,7 @@ program
   .action(async (projectId: string | undefined, opts: { vault?: string; tipo?: string }) => {
     const { readProjectPolicy, mergePolicy, getTypePolicy } = await import('./pm/scheduler.js')
     const { computeHealth } = await import('./pm/loki.js')
+    const { resolvePolicy } = await import('./pm/policy-resolver.js')
 
     const FREQ_LABEL: Record<string, string> = {
       hourly: '1h', daily: '24h', weekly: '7d', monthly: '30d', never: 'never',
@@ -653,6 +654,28 @@ program
         console.log(`  Deadline:    ${dLabel}`)
       }
       console.log(`  Status:      ${snap.health}`)
+
+      const agentId = project.agent ?? (effectiveSteps[0]?.agent)
+      const agent = agentId ? vault.agents.find(a => a.id === agentId || `@${a.folderName}` === agentId || a.folderName === agentId) : undefined
+      if (agent) {
+        const perm = resolvePolicy(agent, project)
+        console.log(`\nPermissions:  (agent: ${agent.id}  mode: ${perm.permissionMode})`)
+        if (perm.permissionMode === 'bypassPermissions') {
+          console.log(`  bypass — all tools allowed (add permissions: [] to directive to restrict)`)
+        } else {
+          if (perm.agentTools.length > 0) {
+            console.log(`  agent directive:  ${perm.agentTools.join(', ')}`)
+          }
+          if (perm.inferredTools.length > 0) {
+            console.log(`  inferred (${perm.inferredFrom ?? 'target'}):  ${perm.inferredTools.join(', ')}`)
+          }
+          if (perm.allowedTools && perm.allowedTools.length > 0) {
+            console.log(`  effective:        ${perm.allowedTools.join(', ')}`)
+          } else {
+            console.log(`  effective:        (none — agent will be blocked from all tools)`)
+          }
+        }
+      }
     }
     console.log(`\n${hr}`)
   })

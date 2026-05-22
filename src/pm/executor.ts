@@ -8,6 +8,7 @@ import { updateCompletedTaskSessionId } from '../vault/update.js'
 import { buildPrompt } from './prompt.js'
 import { parseActionRequired } from '../inbox/action.js'
 import { log } from './loki.js'
+import { resolvePolicy } from './policy-resolver.js'
 
 export interface ExecutorOptions {
   maxContextChars?: number
@@ -168,8 +169,9 @@ export async function runAgent(
   const maxContextChars = opts?.maxContextChars ?? 8000
   const timeoutMs = opts?.timeoutMs ?? 600_000
 
-  const permissionMode = opts?.permissionMode ?? (agent.permissions ? 'default' : 'bypassPermissions')
-  const allowedTools = agent.permissions
+  const policy = resolvePolicy(agent, project)
+  const permissionMode = opts?.permissionMode ?? policy.permissionMode
+  const allowedTools = policy.allowedTools
 
   const prompt = await buildPrompt(agent, project, maxContextChars, opts?.previousOutput)
 

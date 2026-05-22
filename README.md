@@ -233,7 +233,7 @@ Projetos podem sobrescrever com `schedule_compose: override` + `schedule_steps` 
 | Migrate — Archive → Active | Concluída |
 | Phase 3 — Clockify Bridge | Concluída |
 | Phase 4 — Observabilidade USP | Concluída |
-| Phase 5 — HTTP Server | Planejada |
+| Phase 5 — HTTP Server | Concluída |
 | Phase 6 — Kafka EventBus | Planejada |
 
 O roadmap completo vive em `10_Projects/taverna/tasks/` no vault.
