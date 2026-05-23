@@ -3,7 +3,12 @@
 
 export const ASSET_MARKER = 'taverna-asset-v1'
 
-export const DEFAULT_ASSET_EXTENSIONS = ['pdf', 'ppt', 'pptx', 'zip', 'docx', 'mat', 'vhd']
+export const DEFAULT_ASSET_EXTENSIONS = [
+  // Documents
+  'pdf', 'ppt', 'pptx', 'zip', 'docx', 'mat', 'vhd',
+  // Images renderable in Obsidian
+  'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg',
+]
 
 export interface AssetPointer {
   name: string

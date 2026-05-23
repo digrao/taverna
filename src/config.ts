@@ -49,7 +49,10 @@ export function defineConfig(overrides: Partial<TavernaConfig> & { vaultPath: st
     ),
     uspFolderPrefixes: overrides.uspFolderPrefixes ?? ['PSI', 'PEA', 'PEF'],
     scheduledDir: overrides.scheduledDir ?? '60_Agents/5_Schedueled',
-    assetExtensions: overrides.assetExtensions ?? ['pdf', 'ppt', 'pptx', 'zip', 'docx', 'mat', 'vhd'],
+    assetExtensions: overrides.assetExtensions ?? [
+      'pdf', 'ppt', 'pptx', 'zip', 'docx', 'mat', 'vhd',
+      'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg',
+    ],
     gdriveRemote: overrides.gdriveRemote ?? 'jv',
     gdriveBasePath: overrides.gdriveBasePath ?? 'obsidian',
     agentDefaults: overrides.agentDefaults ?? {
