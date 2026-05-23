@@ -90,10 +90,24 @@ export async function readProject(
 
   if (tipo === 'USP') {
     const edisciplinas = getString(data, 'edisciplinas')
+    const contatos = getStringArray(data, 'contatos')
+    const horariosRaw = data['horarios']
+    const horarios = Array.isArray(horariosRaw)
+      ? horariosRaw
+          .filter((h): h is Record<string, unknown> => h != null && typeof h === 'object')
+          .map(h => ({
+            dia: typeof h['dia'] === 'string' ? h['dia'] : '',
+            ...(typeof h['hora'] === 'string' ? { hora: h['hora'] } : {}),
+            ...(typeof h['local'] === 'string' ? { local: h['local'] } : {}),
+          }))
+          .filter(h => h.dia !== '')
+      : undefined
     return {
       ...base,
       tipo: 'USP',
       ...(edisciplinas != null ? { edisciplinas } : {}),
+      ...(contatos.length > 0 ? { contatos } : {}),
+      ...(horarios != null && horarios.length > 0 ? { horarios } : {}),
     } as USPProject
   }
 

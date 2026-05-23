@@ -35,6 +35,38 @@ function formatNextRun(s: number | undefined): string {
   return `${Math.floor(h / 24)}d`
 }
 
+function formatTaskBreakdown(p: VaultProject): { aulas: string; entregas: string } {
+  const aulas = p.tasks.filter(t => t.taskType === 'USP-aula')
+  const entregas = p.tasks.filter(t => t.taskType === 'USP-entrega')
+  const generic = p.tasks.filter(t => t.taskType === undefined)
+
+  if (aulas.length === 0 && entregas.length === 0) {
+    // Legacy tasks without type — show total
+    const done = generic.filter(t => t.progresso === 100).length
+    return { aulas: '—', entregas: `${done}/${generic.length}` }
+  }
+
+  const aulasDone = aulas.filter(t => t.pipelineStage === 'done').length
+  const entregasDone = entregas.filter(
+    t => t.pipelineStage === 'submitted' || t.pipelineStage === 'graded',
+  ).length
+  // Show blocker indicator: aulas not done that block a pending entrega
+  const pendingEntregas = entregas.filter(
+    t => t.pipelineStage !== 'submitted' && t.pipelineStage !== 'graded',
+  )
+  const blocked = pendingEntregas.some(e =>
+    (e.depends ?? []).some(depId =>
+      aulas.find(a => a.id === depId && a.pipelineStage !== 'done'),
+    ),
+  )
+  const blockIndicator = blocked ? ' ⚠' : ''
+
+  return {
+    aulas: `${aulasDone}/${aulas.length}`,
+    entregas: `${entregasDone}/${entregas.length}${blockIndicator}`,
+  }
+}
+
 export function generateBoardBlock(uspProjects: VaultProject[], generatedAt: Date): string {
   const rows = uspProjects
     .map(p => ({ p, snap: computeHealth(p) }))
@@ -46,15 +78,15 @@ export function generateBoardBlock(uspProjects: VaultProject[], generatedAt: Dat
       const icon = HEALTH_ICON[snap.health] ?? '⚪'
       const prio = PRIORITY_ICON[snap.priority] ?? '·'
       const deadline = formatDeadline(snap.deadline_days)
-      const nextRun = formatNextRun(typeof snap.next_run_in_s === 'number' ? snap.next_run_in_s : undefined)
       const lastRun = p.lastRun
         ? new Date(p.lastRun).toLocaleString('pt-BR', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' })
         : '—'
-      return `| ${icon} ${p.id} | ${prio} ${snap.priority} | ${snap.progresso}% | ${snap.tasks_done}/${snap.tasks_total} | ${deadline} | ${lastRun} | ${nextRun} |`
+      const { aulas, entregas } = formatTaskBreakdown(p)
+      return `| ${icon} ${p.id} | ${prio} ${snap.priority} | ${aulas} | ${entregas} | ${deadline} | ${lastRun} |`
     })
 
-  const header = `| Matéria | Prioridade | Progresso | Tasks | Deadline | Último run | Próximo run |`
-  const separator = `|---------|-----------|-----------|-------|----------|-----------|------------|`
+  const header = `| Matéria | Prioridade | Aulas ✓ | Entregas | Deadline | Último run |`
+  const separator = `|---------|-----------|---------|----------|----------|-----------|`
   const tableLines = [header, separator, ...rows]
 
   return [

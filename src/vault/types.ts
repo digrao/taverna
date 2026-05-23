@@ -6,6 +6,8 @@ export type RunEvery = 'hourly' | 'daily' | 'weekly' | 'monthly' | 'never'
 
 export type TaskState = 'backlog' | 'tarefinha' | 'tarefa' | 'em-progresso' | 'aguardando_humano' | 'bloqueada' | 'concluida'
 
+export type UspTaskType = 'USP-aula' | 'USP-entrega'
+
 export type ProjectType = 'USP' | 'BB' | '*'
 
 export interface AgentRunner {
@@ -22,12 +24,17 @@ export interface VaultTask {
   deadline?: string
   assetFolder?: string
   state: TaskState
+  // USP task classification
+  taskType?: UspTaskType
+  pipelineStage?: string   // pipeline.stage from frontmatter
+  workspace?: string       // workspace: path for USP-entrega
+  parent?: string          // parent discipline id
   // Artefatos que o humano precisa entregar antes de o agente prosseguir
   requerHumano?: string[]
   // Bloqueio técnico detectado pelo agente
   bloqueio?: string
   bloqueioDetalhe?: string
-  // Dependency IDs from `depende:` frontmatter field
+  // Dependency IDs from `depende:` or `depends_on:` frontmatter field
   depends?: string[]
   body: string
   raw: RawFrontmatter

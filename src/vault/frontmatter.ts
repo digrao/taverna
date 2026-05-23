@@ -57,3 +57,13 @@ export function getStringArray(fm: RawFrontmatter, key: string): string[] {
   if (!Array.isArray(v)) return []
   return v.filter((x): x is string => typeof x === 'string')
 }
+
+// Reads nested pipeline.stage — gray-matter parses `pipeline:\n  stage: foo` as { pipeline: { stage: 'foo' } }
+export function getPipelineStage(fm: RawFrontmatter): string | undefined {
+  const p = fm['pipeline']
+  if (p && typeof p === 'object' && !Array.isArray(p)) {
+    const stage = (p as Record<string, unknown>)['stage']
+    if (typeof stage === 'string') return stage
+  }
+  return undefined
+}

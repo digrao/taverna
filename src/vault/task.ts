@@ -1,8 +1,8 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join, basename } from 'node:path'
 import { existsSync } from 'node:fs'
-import { parseFrontmatter, getProgress, getPriority, getString, getStringArray } from './frontmatter.js'
-import type { VaultTask, TaskState, Priority, RawFrontmatter } from './types.js'
+import { parseFrontmatter, getProgress, getPriority, getString, getStringArray, getPipelineStage } from './frontmatter.js'
+import type { VaultTask, TaskState, Priority, RawFrontmatter, UspTaskType } from './types.js'
 
 export function progressToState(progresso: number): TaskState {
   if (progresso === 0) return 'tarefinha'
@@ -47,7 +47,18 @@ export async function readProjectTasks(projectFolderPath: string): Promise<Vault
     const bloqueio = getString(data, 'bloqueio')
     const bloqueioDetalhe = getString(data, 'bloqueio_detalhe')
 
-    const depends = getStringArray(data, 'depende').filter(Boolean)
+    // supports both legacy `depende:` and new `depends_on:`
+    const depends = [
+      ...getStringArray(data, 'depende'),
+      ...getStringArray(data, 'depends_on'),
+    ].filter(Boolean)
+
+    const rawType = getString(data, 'type')
+    const taskType: UspTaskType | undefined =
+      rawType === 'USP-aula' || rawType === 'USP-entrega' ? rawType : undefined
+    const pipelineStage = getPipelineStage(data)
+    const workspace = getString(data, 'workspace')
+    const parent = getString(data, 'parent')
 
     tasks.push({
       id: basename(file, '.md'),
@@ -57,6 +68,10 @@ export async function readProjectTasks(projectFolderPath: string): Promise<Vault
       prioridade,
       ...(deadline !== undefined ? { deadline } : {}),
       ...(assetFolder !== undefined ? { assetFolder } : {}),
+      ...(taskType !== undefined ? { taskType } : {}),
+      ...(pipelineStage !== undefined ? { pipelineStage } : {}),
+      ...(workspace !== undefined ? { workspace } : {}),
+      ...(parent !== undefined ? { parent } : {}),
       ...(requerHumano.length > 0 ? { requerHumano } : {}),
       ...(bloqueio !== undefined ? { bloqueio } : {}),
       ...(bloqueioDetalhe !== undefined ? { bloqueioDetalhe } : {}),
