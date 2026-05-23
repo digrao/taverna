@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 export interface TavernaConfig {
   vaultPath: string
   projectsDir: string
@@ -15,7 +18,25 @@ export interface TavernaConfig {
   agentDefaults: Record<string, string>
 }
 
+/** Load KEY=VALUE pairs from <vaultPath>/.env into process.env (non-destructive). */
+function loadVaultEnv(vaultPath: string): void {
+  const envFile = join(vaultPath, '.env')
+  if (!existsSync(envFile)) return
+  for (const line of readFileSync(envFile, 'utf8').split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eq = trimmed.indexOf('=')
+    if (eq === -1) continue
+    const key = trimmed.slice(0, eq).trim()
+    const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, '')
+    if (key && !(key in process.env)) process.env[key] = val
+  }
+}
+
 export function defineConfig(overrides: Partial<TavernaConfig> & { vaultPath: string }): TavernaConfig {
+  loadVaultEnv(overrides.vaultPath)
+
+  const copypartyUrl = overrides.copypartyUrl ?? process.env['COPYPARTY_URL']
   const pad = (n: number) => String(n).padStart(2, '0')
   return {
     vaultPath: overrides.vaultPath,
@@ -36,6 +57,6 @@ export function defineConfig(overrides: Partial<TavernaConfig> & { vaultPath: st
       'BB':  '@planner',
       '*':   '@dev-agent',
     },
-    ...(overrides.copypartyUrl !== undefined ? { copypartyUrl: overrides.copypartyUrl } : {}),
+    ...(copypartyUrl !== undefined ? { copypartyUrl } : {}),
   }
 }

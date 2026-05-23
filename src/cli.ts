@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { Command } from 'commander'
-import { join } from 'node:path'
+import { join, isAbsolute, resolve } from 'node:path'
+import { readdir } from 'node:fs/promises'
+import type { Dirent } from 'node:fs'
 import { morning } from './morning/index.js'
 import { defineConfig } from './config.js'
 import { storeAssets, pullAssets, statusAssets } from './assets/index.js'
@@ -175,6 +177,33 @@ program
     await morning(config, { dryRun: opts.dryRun ?? false })
   })
 
+// ── assets helpers ────────────────────────────────────────────────────────────
+
+/** Resolve a user-supplied target to an absolute path.
+ *  Absolute paths are used as-is; relative paths are resolved against vaultPath. */
+function resolveAssetPath(target: string, vaultPath: string): string {
+  return isAbsolute(target) ? target : resolve(vaultPath, target)
+}
+
+/** Recursively find all directories named 'assets' within a project dir.
+ *  Falls back to [projectDir] itself if none are found. */
+async function findProjectAssetsDirs(projectDir: string): Promise<string[]> {
+  const found: string[] = []
+  const recurse = async (dir: string, depth: number): Promise<void> => {
+    if (depth > 6) return
+    let entries: Dirent[]
+    try { entries = await readdir(dir, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      if (!e.isDirectory() || e.name.startsWith('.')) continue
+      const full = join(dir, e.name)
+      if (e.name === 'assets') found.push(full)
+      else await recurse(full, depth + 1)
+    }
+  }
+  await recurse(projectDir, 0)
+  return found.length > 0 ? found : [projectDir]
+}
+
 // ── assets ────────────────────────────────────────────────────────────────────
 
 const assetsCmd = program
@@ -182,70 +211,97 @@ const assetsCmd = program
   .description('Manage heavy assets outside the vault git repo')
 
 assetsCmd
-  .command('store <project>')
+  .command('store <target>')
   .description('Upload assets to remote and create .asset pointer files')
   .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
   .option('--copyparty <url>', 'Copyparty server URL')
   .option('--gdrive', 'Also upload to Google Drive via rclone')
   .option('--dry-run', 'Show what would be stored without uploading')
-  .action(async (project: string, opts: { vault?: string; copyparty?: string; gdrive?: boolean; dryRun?: boolean }) => {
+  .option('--project', 'Treat <target> as project ID; auto-discovers assets/ subdirs')
+  .action(async (target: string, opts: { vault?: string; copyparty?: string; gdrive?: boolean; dryRun?: boolean; project?: boolean }) => {
     const vaultPath = getVaultPath(opts)
     const config = defineConfig({
       vaultPath,
       ...(opts.copyparty ? { copypartyUrl: opts.copyparty } : {}),
     })
-    const assetsDir = join(vaultPath, config.projectsDir, project, 'assets')
-    const result = await storeAssets(assetsDir, {
-      vaultPath,
-      extensions: config.assetExtensions,
-      ...(config.copypartyUrl ? { copypartyUrl: config.copypartyUrl } : {}),
-      ...(opts.gdrive ? { gdriveRemote: config.gdriveRemote, gdriveBasePath: config.gdriveBasePath } : {}),
-      ...(opts.dryRun ? { dryRun: true as const } : {}),
-    })
 
-    for (const f of result.stored) console.log(`  stored  ${f.replace(vaultPath + '/', '')}`)
-    for (const f of result.skipped) console.log(`  skip    ${f.replace(vaultPath + '/', '')}`)
-    for (const e of result.errors) console.error(`  error   ${e.file}: ${e.error}`)
-    console.log(`\n${result.stored.length} stored, ${result.skipped.length} skipped, ${result.errors.length} errors`)
+    const dirs = opts.project
+      ? await findProjectAssetsDirs(join(vaultPath, config.projectsDir, target))
+      : [resolveAssetPath(target, vaultPath)]
+
+    let totalStored = 0, totalSkipped = 0, totalErrors = 0
+    for (const dir of dirs) {
+      if (dirs.length > 1) console.log(`\n→ ${dir.replace(vaultPath + '/', '')}`)
+      const result = await storeAssets(dir, {
+        vaultPath,
+        extensions: config.assetExtensions,
+        ...(config.copypartyUrl ? { copypartyUrl: config.copypartyUrl } : {}),
+        ...(opts.gdrive ? { gdriveRemote: config.gdriveRemote, gdriveBasePath: config.gdriveBasePath } : {}),
+        ...(opts.dryRun ? { dryRun: true as const } : {}),
+      })
+      for (const f of result.stored) console.log(`  stored  ${f.replace(vaultPath + '/', '')}`)
+      for (const f of result.skipped) console.log(`  skip    ${f.replace(vaultPath + '/', '')}`)
+      for (const e of result.errors) console.error(`  error   ${e.file}: ${e.error}`)
+      totalStored += result.stored.length
+      totalSkipped += result.skipped.length
+      totalErrors += result.errors.length
+    }
+    console.log(`\n${totalStored} stored, ${totalSkipped} skipped, ${totalErrors} errors`)
   })
 
 assetsCmd
-  .command('pull <project>')
+  .command('pull <target>')
   .description('Download missing or modified assets from copyparty')
   .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
   .option('--dry-run', 'Show what would be downloaded without fetching')
-  .action(async (project: string, opts: { vault?: string; dryRun?: boolean }) => {
+  .option('--project', 'Treat <target> as project ID; auto-discovers assets/ subdirs')
+  .action(async (target: string, opts: { vault?: string; dryRun?: boolean; project?: boolean }) => {
     const vaultPath = getVaultPath(opts)
     const config = defineConfig({ vaultPath })
-    const assetsDir = join(vaultPath, config.projectsDir, project, 'assets')
-    const result = await pullAssets(assetsDir, { ...(opts.dryRun ? { dryRun: true as const } : {}) })
 
-    for (const f of result.downloaded) console.log(`  pulled  ${f.replace(vaultPath + '/', '')}`)
-    for (const f of result.skipped) console.log(`  ok      ${f.replace(vaultPath + '/', '')}`)
-    for (const e of result.errors) console.error(`  error   ${e.file}: ${e.error}`)
-    console.log(`\n${result.downloaded.length} downloaded, ${result.skipped.length} up-to-date, ${result.errors.length} errors`)
+    const dirs = opts.project
+      ? await findProjectAssetsDirs(join(vaultPath, config.projectsDir, target))
+      : [resolveAssetPath(target, vaultPath)]
+
+    let totalDownloaded = 0, totalSkipped = 0, totalErrors = 0
+    for (const dir of dirs) {
+      if (dirs.length > 1) console.log(`\n→ ${dir.replace(vaultPath + '/', '')}`)
+      const result = await pullAssets(dir, { ...(opts.dryRun ? { dryRun: true as const } : {}) })
+      for (const f of result.downloaded) console.log(`  pulled  ${f.replace(vaultPath + '/', '')}`)
+      for (const f of result.skipped) console.log(`  ok      ${f.replace(vaultPath + '/', '')}`)
+      for (const e of result.errors) console.error(`  error   ${e.file}: ${e.error}`)
+      totalDownloaded += result.downloaded.length
+      totalSkipped += result.skipped.length
+      totalErrors += result.errors.length
+    }
+    console.log(`\n${totalDownloaded} downloaded, ${totalSkipped} up-to-date, ${totalErrors} errors`)
   })
 
 assetsCmd
-  .command('status <project>')
+  .command('status <target>')
   .description('Show local vs remote asset state')
   .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .action(async (project: string, opts: { vault?: string }) => {
+  .option('--project', 'Treat <target> as project ID; auto-discovers assets/ subdirs')
+  .action(async (target: string, opts: { vault?: string; project?: boolean }) => {
     const vaultPath = getVaultPath(opts)
     const config = defineConfig({ vaultPath })
-    const assetsDir = join(vaultPath, config.projectsDir, project, 'assets')
-    const statuses = await statusAssets(assetsDir, config.assetExtensions)
 
-    if (statuses.length === 0) {
-      console.log('No assets found.')
-      return
-    }
+    const dirs = opts.project
+      ? await findProjectAssetsDirs(join(vaultPath, config.projectsDir, target))
+      : [resolveAssetPath(target, vaultPath)]
 
     const icons: Record<string, string> = { ok: 'ok      ', missing: 'missing ', modified: 'modified', 'no-pointer': 'unstored' }
-    for (const s of statuses) {
-      const size = s.size !== undefined ? ` (${fmtSize(s.size)})` : ''
-      console.log(`  ${icons[s.state]}  ${s.relativePath}${size}`)
+    let total = 0
+    for (const dir of dirs) {
+      if (dirs.length > 1) console.log(`\n→ ${dir.replace(vaultPath + '/', '')}`)
+      const statuses = await statusAssets(dir, config.assetExtensions)
+      for (const s of statuses) {
+        const size = s.size !== undefined ? ` (${fmtSize(s.size)})` : ''
+        console.log(`  ${icons[s.state]}  ${s.relativePath}${size}`)
+      }
+      total += statuses.length
     }
+    if (total === 0) console.log('No assets found.')
   })
 
 // ── run ───────────────────────────────────────────────────────────────────────
