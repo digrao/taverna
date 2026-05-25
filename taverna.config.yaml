@@ -1,0 +1,3 @@
+budget:
+  global_tokens_daily: 250000   # ~2-3 runs de agente/dia, deixa margem para uso interativo
+  warn_at_pct: 75
