@@ -26,7 +26,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^12.0.0",
     "gray-matter": "^4.0.3",
-    "neo-matrix": "file:../neo-matrix",
+    "@jvcm-infra/neo-matrix": "file:../neo-matrix",
     "zod": "^4.4.3"
   },
   "devDependencies": {

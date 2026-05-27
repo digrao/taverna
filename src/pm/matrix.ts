@@ -1,4 +1,4 @@
-import { NeoMatrixClient } from 'neo-matrix'
+import { NeoMatrixClient } from '@jvcm-infra/neo-matrix'
 
 export interface MatrixConfig {
   homeserver: string
