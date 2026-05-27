@@ -23,7 +23,10 @@ function detectStudyMode(task: VaultTask | undefined): string {
   return 'teoria'
 }
 
-async function resolveDirectiveText(agent: VaultAgent, firstTask: VaultTask | undefined): Promise<string> {
+async function resolveDirectiveText(
+  agent: VaultAgent,
+  firstTask: VaultTask | undefined,
+): Promise<string> {
   const baseDir = dirname(agent.directivesPath)
   const modesDir = join(baseDir, 'modes')
   const conventionsPath = join(baseDir, 'conventions.md')
@@ -54,10 +57,7 @@ export function resolveTarget(raw: string): string {
 
 function renderTask(t: VaultTask): string {
   const icon = PRIORITY_ICON[t.prioridade] ?? '·'
-  const lines = [
-    `### ${icon} ${t.id} (${t.progresso}%)`,
-    `_file: ${t.filePath}_`,
-  ]
+  const lines = [`### ${icon} ${t.id} (${t.progresso}%)`, `_file: ${t.filePath}_`]
   if (t.body) lines.push('', t.body)
   return lines.join('\n')
 }
@@ -88,14 +88,87 @@ This applies to every agent after finishing work on a task:
    \`RESULTADO: <summary of what was done>\`
 `
 
-export async function buildPrompt(agent: VaultAgent, project: VaultProject, maxChars: number, previousOutput?: string): Promise<string> {
+export async function buildSessionPrompt(
+  agent: VaultAgent,
+  project: VaultProject,
+  sessionTasks: VaultTask[],
+  maxChars: number,
+  sessionId: string,
+  logtaskPath: string,
+): Promise<string> {
+  const rawTarget = typeof project.raw['target'] === 'string' ? project.raw['target'] : undefined
+  const target = rawTarget ? resolveTarget(rawTarget) : undefined
+  const directiveText = await resolveDirectiveText(agent, sessionTasks[0])
+
+  const meta = [
+    '# Agent Session',
+    '',
+    `**Session:** ${sessionId}`,
+    `**Project:** ${project.id}`,
+    `**Type:** ${project.tipo}`,
+    `**Priority:** ${project.priority}`,
+    `**Session File:** ${logtaskPath}`,
+    ...(target ? [`**Target:** ${target}`] : []),
+    '',
+    '## Directives',
+    '',
+    directiveText,
+    '',
+    COMPLETION_PROTOCOL,
+    '',
+  ].join('\n')
+
+  const CONTEXT_RESERVE = 800
+  let taskBudget = maxChars - meta.length - CONTEXT_RESERVE
+
+  const includedTasks: string[] = []
+  let omitted = 0
+  for (const t of sessionTasks) {
+    const rendered = renderTask(t)
+    if (taskBudget - rendered.length - 1 >= 0) {
+      includedTasks.push(rendered)
+      taskBudget -= rendered.length + 1
+    } else {
+      omitted++
+    }
+  }
+
+  const taskSection =
+    includedTasks.length > 0
+      ? [
+          '## Session Tasks',
+          '',
+          `Execute these ${sessionTasks.length} task(s) in sequence within this single session:`,
+          '',
+          ...includedTasks,
+          ...(omitted > 0 ? [`\n_…${omitted} more task(s) not shown — check tasks/ folder_`] : []),
+          '',
+        ].join('\n')
+      : ''
+
+  const fixedPart = meta + taskSection
+
+  const CONTEXT_HEADER = '## Project Context\n\n'
+  const contextBudget = Math.max(0, maxChars - fixedPart.length - CONTEXT_HEADER.length)
+  const contextSlice = project.content.slice(0, contextBudget)
+  const contextSection = contextSlice ? CONTEXT_HEADER + contextSlice : ''
+
+  return fixedPart + contextSection
+}
+
+export async function buildPrompt(
+  agent: VaultAgent,
+  project: VaultProject,
+  maxChars: number,
+  previousOutput?: string,
+): Promise<string> {
   const rawTarget = typeof project.raw['target'] === 'string' ? project.raw['target'] : undefined
   const target = rawTarget ? resolveTarget(rawTarget) : undefined
 
   const allTasks = project.tasks
   const pending = allTasks
-    .filter(t => t.progresso < 100)
-    .filter(t => !isBlocked(t, allTasks).blocked)
+    .filter((t) => t.progresso < 100)
+    .filter((t) => !isBlocked(t, allTasks).blocked)
   const directiveText = await resolveDirectiveText(agent, pending[0])
 
   const meta = [
@@ -131,15 +204,16 @@ export async function buildPrompt(agent: VaultAgent, project: VaultProject, maxC
     }
   }
 
-  const taskSection = includedTasks.length > 0
-    ? [
-        '## Pending Tasks',
-        '',
-        ...includedTasks,
-        ...(omitted > 0 ? [`\n_…${omitted} more task(s) not shown — check tasks/ folder_`] : []),
-        '',
-      ].join('\n')
-    : ''
+  const taskSection =
+    includedTasks.length > 0
+      ? [
+          '## Pending Tasks',
+          '',
+          ...includedTasks,
+          ...(omitted > 0 ? [`\n_…${omitted} more task(s) not shown — check tasks/ folder_`] : []),
+          '',
+        ].join('\n')
+      : ''
 
   const fixedPart = meta + taskSection
 

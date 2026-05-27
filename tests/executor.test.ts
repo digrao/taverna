@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { buildPrompt } from '../src/pm/prompt.js'
-import { parseResultado, runAgent, runPipeline } from '../src/pm/executor.js'
-import type { VaultAgent, VaultProject } from '../src/vault/types.js'
+import { buildPrompt, buildSessionPrompt } from '../src/pm/prompt.js'
+import { parseResultado, runAgent, runPipeline, runSession } from '../src/pm/executor.js'
+import { buildLogtaskContent } from '../src/pm/session.js'
+import type { VaultAgent, VaultProject, VaultTask } from '../src/vault/types.js'
 
 const mockAgent: VaultAgent = {
   id: '@test',
@@ -23,6 +24,28 @@ const mockProject: VaultProject = {
   hasTasksFolder: false,
   hasAssetsFolder: false,
   content: 'This is the project content. '.repeat(100),
+  raw: {},
+}
+
+const mockTask: VaultTask = {
+  id: 'task-01',
+  filePath: '/fake/TEST001/tasks/task-01.md',
+  title: 'First task',
+  progresso: 0,
+  prioridade: 'high',
+  state: 'backlog',
+  body: 'Do the first thing.',
+  raw: {},
+}
+
+const mockTask2: VaultTask = {
+  id: 'task-02',
+  filePath: '/fake/TEST001/tasks/task-02.md',
+  title: 'Second task',
+  progresso: 0,
+  prioridade: 'medium',
+  state: 'backlog',
+  body: 'Do the second thing.',
   raw: {},
 }
 
@@ -114,6 +137,117 @@ describe('buildPrompt previousOutput', () => {
   it('omits previous output section when not provided', async () => {
     const prompt = await buildPrompt(mockAgent, mockProject, 8000)
     expect(prompt).not.toContain('## Previous Agent Output')
+  })
+})
+
+// ── buildLogtaskContent ───────────────────────────────────────────────────────
+
+describe('buildLogtaskContent', () => {
+  it('includes session_id and project in frontmatter', () => {
+    const spec = {
+      session_id: 'abc-123',
+      status: 'in-progress' as const,
+      project: 'TEST001',
+      agent: '@test',
+      tasks: ['task-01', 'task-02'],
+      _session_started: '2026-05-27T00:00:00.000Z',
+    }
+    const content = buildLogtaskContent(spec, [mockTask, mockTask2])
+    expect(content).toContain('session_id: abc-123')
+    expect(content).toContain('project: TEST001')
+    expect(content).toContain('status: in-progress')
+  })
+
+  it('lists all tasks with file paths', () => {
+    const spec = {
+      session_id: 'xyz',
+      status: 'pending' as const,
+      project: 'P',
+      agent: '@a',
+      tasks: ['task-01', 'task-02'],
+      _session_started: '2026-01-01T00:00:00.000Z',
+    }
+    const content = buildLogtaskContent(spec, [mockTask, mockTask2])
+    expect(content).toContain('task-01')
+    expect(content).toContain('task-02')
+    expect(content).toContain('/fake/TEST001/tasks/task-01.md')
+    expect(content).toContain('/fake/TEST001/tasks/task-02.md')
+  })
+})
+
+// ── buildSessionPrompt ────────────────────────────────────────────────────────
+
+describe('buildSessionPrompt', () => {
+  it('includes session ID, project ID, and all task IDs', async () => {
+    const prompt = await buildSessionPrompt(
+      mockAgent,
+      mockProject,
+      [mockTask, mockTask2],
+      8000,
+      'session-uuid-1',
+      '/tmp/taverna-sessions/session-uuid-1.logtask.md',
+    )
+    expect(prompt).toContain('session-uuid-1')
+    expect(prompt).toContain('TEST001')
+    expect(prompt).toContain('task-01')
+    expect(prompt).toContain('task-02')
+  })
+
+  it('includes "Session Tasks" header', async () => {
+    const prompt = await buildSessionPrompt(
+      mockAgent,
+      mockProject,
+      [mockTask],
+      8000,
+      'sid',
+      '/tmp/x.md',
+    )
+    expect(prompt).toContain('## Session Tasks')
+    expect(prompt).toContain('Execute these 1 task(s) in sequence')
+  })
+
+  it('includes agent directive', async () => {
+    const prompt = await buildSessionPrompt(
+      mockAgent,
+      mockProject,
+      [mockTask],
+      8000,
+      'sid',
+      '/tmp/x.md',
+    )
+    expect(prompt).toContain('You are a test agent')
+  })
+})
+
+// ── runSession ────────────────────────────────────────────────────────────────
+
+describe('runSession', () => {
+  it('returns session prompt as output when dryRun is true', async () => {
+    const result = await runSession(
+      { agent: mockAgent, project: mockProject, tasks: [mockTask, mockTask2] },
+      { dryRun: true },
+    )
+    expect(result.success).toBe(true)
+    expect(result.output).toContain('Agent Session')
+    expect(result.output).toContain('TEST001')
+    expect(result.durationMs).toBe(0)
+  })
+
+  it('dry-run output contains all task IDs', async () => {
+    const result = await runSession(
+      { agent: mockAgent, project: mockProject, tasks: [mockTask, mockTask2] },
+      { dryRun: true },
+    )
+    expect(result.output).toContain('task-01')
+    expect(result.output).toContain('task-02')
+  })
+
+  it('dry-run includes logtask file path', async () => {
+    const result = await runSession(
+      { agent: mockAgent, project: mockProject, tasks: [mockTask] },
+      { dryRun: true },
+    )
+    expect(result.output).toContain('logtask.md')
   })
 })
 

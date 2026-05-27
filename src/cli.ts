@@ -15,7 +15,7 @@ import {
   updateProjectStatus,
   readProject,
 } from './vault/index.js'
-import { runAgent, runPipeline } from './pm/executor.js'
+import { runAgent, runPipeline, runSession } from './pm/executor.js'
 import { snapshot, computeHealth } from './pm/loki.js'
 import { emitEvent } from './pm/event-bus.js'
 import { updateBoardFile } from './usp/board.js'
@@ -535,6 +535,149 @@ program
         )
         await drainProject(agent, project, maxTasks, runOpts, config, opts.dryRun ?? false)
       }
+    },
+  )
+
+// ── session ───────────────────────────────────────────────────────────────────
+
+const sessionCmd = program
+  .command('session')
+  .description('Batch multiple tasks into a single agent session to maximize cache reuse')
+
+sessionCmd
+  .command('preview')
+  .description('Show eligible tasks grouped by project for batched session execution')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .option('--project <id>', 'Filter to a specific project')
+  .action(async (opts: { vault?: string; project?: string }) => {
+    const { isBlocked } = await import('./vault/task.js')
+    const vaultPath = getVaultPath(opts)
+    const config = defineConfig({ vaultPath })
+    const vault = await scanVault(config)
+
+    const projects = opts.project
+      ? vault.projects.filter((p) => p.id === opts.project || p.name === opts.project)
+      : vault.projects
+
+    let found = 0
+    for (const project of projects) {
+      const unblocked = project.tasks
+        .filter((t) => t.progresso < 100)
+        .filter((t) => !isBlocked(t, project.tasks).blocked)
+      if (unblocked.length === 0) continue
+      found++
+      const agentId = project.agent ?? config.agentDefaults[project.tipo] ?? '(none)'
+      console.log(`\n${project.id}  →  ${agentId}  (${unblocked.length} task(s))`)
+      for (const t of unblocked) {
+        const pct = t.progresso > 0 ? ` (${t.progresso}%)` : ''
+        console.log(`  · ${t.id}${pct}  ${t.title}`)
+      }
+    }
+    if (found === 0) console.log('No projects with eligible tasks.')
+    console.log()
+  })
+
+sessionCmd
+  .command('run')
+  .description('Run a batched session of tasks for a project')
+  .requiredOption('--project <id>', 'Project ID')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .option('--tasks <ids>', 'Comma-separated task IDs to include (default: all unblocked pending)')
+  .option('--dry-run', 'Print the session prompt without executing')
+  .option('--max-chars <n>', 'Max context chars', '8000')
+  .option('--timeout <ms>', 'Agent timeout in ms', '600000')
+  .action(
+    async (opts: {
+      project: string
+      vault?: string
+      tasks?: string
+      dryRun?: boolean
+      maxChars?: string
+      timeout?: string
+    }) => {
+      const { isBlocked } = await import('./vault/task.js')
+      const vaultPath = getVaultPath(opts)
+      const config = defineConfig({ vaultPath })
+      const vault = await scanVault(config)
+
+      const project = vault.projects.find((p) => p.id === opts.project || p.name === opts.project)
+      if (!project) {
+        console.error(`Project not found: ${opts.project}`)
+        process.exit(1)
+      }
+
+      const agentId = project.agent ?? config.agentDefaults[project.tipo]
+      if (!agentId) {
+        console.error(`No agent configured for project ${project.id}`)
+        process.exit(1)
+      }
+      const agent = vault.agents.find(
+        (a) => a.id === agentId || a.folderName === agentId || `@${a.folderName}` === agentId,
+      )
+      if (!agent) {
+        console.error(`Agent not found: ${agentId}`)
+        process.exit(1)
+      }
+
+      const allUnblocked = project.tasks
+        .filter((t) => t.progresso < 100)
+        .filter((t) => !isBlocked(t, project.tasks).blocked)
+
+      const taskFilter = opts.tasks ? opts.tasks.split(',').map((s) => s.trim()) : null
+      const sessionTasks = taskFilter
+        ? allUnblocked.filter((t) => taskFilter.includes(t.id))
+        : allUnblocked
+
+      if (sessionTasks.length === 0) {
+        console.log('No eligible tasks for session.')
+        return
+      }
+
+      console.log(`\nSession: ${agent.id} on ${project.id} (${sessionTasks.length} task(s))`)
+      for (const t of sessionTasks) console.log(`  · ${t.id}  ${t.title}`)
+      console.log()
+
+      const result = await runSession(
+        { agent, project, tasks: sessionTasks },
+        {
+          maxContextChars: Number(opts.maxChars ?? 8000),
+          timeoutMs: Number(opts.timeout ?? 600_000),
+          vaultPath: config.vaultPath,
+          dryRun: opts.dryRun ?? false,
+        },
+      )
+
+      if (opts.dryRun) {
+        console.log(result.output)
+        return
+      }
+
+      if (result.success) {
+        await updateProjectStatus(project.filePath, {
+          lastRun: new Date().toISOString(),
+          lastStatus: 'success',
+          runsTotal: project.runsTotal + 1,
+        })
+        await appendLogbook(
+          agent.id,
+          {
+            projectName: project.id,
+            content: [
+              `**Session:** ${result.sessionId}`,
+              `**Tasks:** ${sessionTasks.map((t) => t.id).join(', ')}`,
+              `**Success:** true`,
+              `**Duration:** ${((result.durationMs ?? 0) / 1000).toFixed(1)}s`,
+              ...(result.resultado ? [`**Resultado:** ${result.resultado}`] : []),
+            ].join('\n'),
+            success: true,
+            duration: (result.durationMs ?? 0) / 1000,
+          },
+          config,
+        )
+      }
+
+      console.log(result.success ? `  done (${result.durationMs}ms)` : `  failed: ${result.error}`)
+      if (result.resultado) console.log(`  RESULTADO: ${result.resultado}`)
     },
   )
 
