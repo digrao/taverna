@@ -7,7 +7,7 @@
     "taverna": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp -r src/server/slides dist/server/",
     "dev": "tsx src/cli.ts",
     "morning": "VAULT_PATH=${VAULT_PATH:-/home/jvcm/tmp} tsx src/cli.ts morning",
     "morning:dry": "VAULT_PATH=${VAULT_PATH:-/home/jvcm/tmp} tsx src/cli.ts morning --dry-run",

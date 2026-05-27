@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { VaultCache } from './cache.js'
@@ -70,6 +71,7 @@ export class Router {
 
     if (path === '/dashboard') return this.handleDashboard(req, res)
     if (path === '/flow') return this.handleFlow(req, res)
+    if (path === '/slides' || path.startsWith('/slides/')) return this.handleSlides(req, res, path)
     if (path === '/api/active') return this.handleApiActive(req, res)
     if (path === '/api/state') return this.handleApiState(req, res)
     if (path === '/api/costs') return this.handleApiCosts(req, res)
@@ -173,6 +175,47 @@ export class Router {
     const html = renderFlow(state.projects)
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
     res.end(html)
+  }
+
+  private async handleSlides(
+    _req: IncomingMessage,
+    res: ServerResponse,
+    path: string,
+  ): Promise<void> {
+    const slidesDir = join(dirname(fileURLToPath(import.meta.url)), 'slides')
+
+    if (path === '/slides') {
+      let files: string[]
+      try {
+        files = (await readdir(slidesDir)).filter((f) => f.endsWith('.html'))
+      } catch {
+        files = []
+      }
+      const items = files
+        .map((f) => {
+          const name = f.replace(/\.html$/, '')
+          return `<li><a href="/slides/${name}">${name}</a></li>`
+        })
+        .join('\n')
+      const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
+<title>Slides</title>
+<style>body{font-family:monospace;background:#0c0a09;color:#d6d3d1;padding:40px}
+a{color:#f59e0b}ul{line-height:2}</style></head>
+<body><h2>Slides</h2><ul>${items}</ul><p><a href="/dashboard">← dashboard</a></p></body></html>`
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      res.end(html)
+      return
+    }
+
+    const name = path.slice('/slides/'.length).replace(/[^a-zA-Z0-9_-]/g, '')
+    const filePath = join(slidesDir, `${name}.html`)
+    try {
+      const html = await readFile(filePath, 'utf-8')
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      res.end(html)
+    } catch {
+      this.json(res, { error: `slide "${name}" not found` }, 404)
+    }
   }
 
   private async handleApiState(_req: IncomingMessage, res: ServerResponse): Promise<void> {
