@@ -127,6 +127,57 @@ describe('addTask', () => {
     })
     expect(existsSync(join(projectDir, 'tasks'))).toBe(true)
   })
+
+  it('generic task gets numeric prefix and correct frontmatter', async () => {
+    const result = await addTask(tmpDir, 'taverna', {
+      type: 'generic',
+      topic: 'Add feature X',
+      prioridade: 'alta',
+    })
+
+    expect(result.created).toBe(true)
+    expect(result.id).toMatch(/^1-/)
+    const content = readFileSync(result.filePath, 'utf8')
+    expect(content).toContain('progresso: 0')
+    expect(content).toContain('prioridade: alta')
+    expect(content).not.toContain('type:')
+    expect(content).not.toContain('parent:')
+    expect(content).toContain('# Add feature X')
+    expect(content).toContain('## Critérios de conclusão')
+  })
+
+  it('generic task increments number based on existing tasks', async () => {
+    const tasksDir = join(tmpDir, 'tasks')
+    await import('node:fs/promises').then((m) => m.mkdir(tasksDir, { recursive: true }))
+    await import('node:fs/promises').then((m) =>
+      m.writeFile(join(tasksDir, '5-existing.md'), '# x'),
+    )
+
+    const result = await addTask(tmpDir, 'proj', {
+      type: 'generic',
+      topic: 'New task',
+      prioridade: 'baixa',
+    })
+
+    expect(result.id).toMatch(/^6-/)
+  })
+
+  it('generic task includes optional body and depende', async () => {
+    const result = await addTask(tmpDir, 'proj', {
+      type: 'generic',
+      topic: 'My task',
+      prioridade: 'média',
+      body: 'Some description here.',
+      depende: ['1-other-task'],
+      deadline: '2026-07-01',
+    })
+
+    const content = readFileSync(result.filePath, 'utf8')
+    expect(content).toContain('depende:')
+    expect(content).toContain("- '[[1-other-task]]'")
+    expect(content).toContain('deadline: 2026-07-01')
+    expect(content).toContain('Some description here.')
+  })
 })
 
 // ── scaffoldProject ─────────────────────────────────────────────────────────────

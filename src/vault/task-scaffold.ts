@@ -1,11 +1,12 @@
-import { writeFile, mkdir } from 'node:fs/promises'
+import { writeFile, mkdir, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 
 export type UspTaskType = 'USP-aula' | 'USP-entrega'
+export type TaskType = UspTaskType | 'generic'
 export type TaskPrioridade = 'alta' | 'média' | 'baixa'
 
-export interface TaskScaffoldInput {
+export interface UspTaskInput {
   type: UspTaskType
   topic: string
   prioridade: TaskPrioridade
@@ -14,6 +15,17 @@ export interface TaskScaffoldInput {
   workspace?: string
   dependsOn?: string[]
 }
+
+export interface GenericTaskInput {
+  type: 'generic'
+  topic: string
+  prioridade: TaskPrioridade
+  body?: string
+  depende?: string[]
+  deadline?: string
+}
+
+export type TaskScaffoldInput = UspTaskInput | GenericTaskInput
 
 export interface TaskScaffoldResult {
   id: string
@@ -39,7 +51,25 @@ export function deriveTaskId(topic: string): string {
   return id || 'task'
 }
 
-function buildContent(input: TaskScaffoldInput, projectId: string): string {
+async function nextTaskNumber(tasksDir: string): Promise<number> {
+  const dirs = [tasksDir, join(tasksDir, 'archive')]
+  let max = 0
+  for (const dir of dirs) {
+    let entries: string[]
+    try {
+      entries = (await readdir(dir)).filter((n) => n.endsWith('.md'))
+    } catch {
+      continue
+    }
+    for (const name of entries) {
+      const m = name.match(/^(\d+)[-_]/)
+      if (m?.[1]) max = Math.max(max, parseInt(m[1], 10))
+    }
+  }
+  return max + 1
+}
+
+function buildUspContent(input: UspTaskInput, projectId: string): string {
   const lines: string[] = [
     '---',
     `type: ${input.type}`,
@@ -61,21 +91,53 @@ function buildContent(input: TaskScaffoldInput, projectId: string): string {
   return lines.join('\n')
 }
 
+function buildGenericContent(input: GenericTaskInput): string {
+  const lines: string[] = ['---', 'progresso: 0', `prioridade: ${input.prioridade}`]
+
+  if (input.deadline) lines.push(`deadline: ${input.deadline}`)
+  if (input.depende && input.depende.length > 0) {
+    lines.push('depende:')
+    for (const dep of input.depende) lines.push(`  - '[[${dep}]]'`)
+  }
+
+  lines.push('---', '', `# ${input.topic}`, '')
+
+  if (input.body) {
+    lines.push(input.body, '')
+  }
+
+  lines.push('## Critérios de conclusão', '', '- [ ] ', '')
+  return lines.join('\n')
+}
+
 export async function addTask(
   projectFolderPath: string,
   projectId: string,
   input: TaskScaffoldInput,
 ): Promise<TaskScaffoldResult> {
-  const id = deriveTaskId(input.topic)
   const tasksDir = join(projectFolderPath, 'tasks')
-  const filePath = join(tasksDir, `${id}.md`)
+
+  let id: string
+  let filePath: string
+
+  if (input.type === 'generic') {
+    const n = await nextTaskNumber(tasksDir)
+    const slug = deriveTaskId(input.topic)
+    id = `${n}-${slug}`
+    filePath = join(tasksDir, `${id}.md`)
+  } else {
+    id = deriveTaskId(input.topic)
+    filePath = join(tasksDir, `${id}.md`)
+  }
 
   if (existsSync(filePath)) {
     return { id, filePath, created: false, reason: 'already_exists' }
   }
 
   await mkdir(tasksDir, { recursive: true })
-  await writeFile(filePath, buildContent(input, projectId), 'utf8')
+  const content =
+    input.type === 'generic' ? buildGenericContent(input) : buildUspContent(input, projectId)
+  await writeFile(filePath, content, 'utf8')
 
   return { id, filePath, created: true }
 }

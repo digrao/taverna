@@ -150,19 +150,49 @@ const PROJECTS_DIR = join(VAULT_PATH, '10_Projects')
 
 server.tool(
   'taverna_add_task',
-  'Create a USP task (aula or entrega) in a vault project. Derives the task id from the topic.',
+  'Create a task in a vault project. type=generic for dev/infra tasks; USP-aula/USP-entrega for study tasks.',
   {
-    projectId: z.string().describe('Project ID (e.g. PSI3451)'),
-    type: z.enum(['USP-aula', 'USP-entrega']),
+    projectId: z.string().describe('Project ID (e.g. PSI3451 or taverna)'),
+    type: z.enum(['USP-aula', 'USP-entrega', 'generic']),
     topic: z.string().describe('Task topic — used to generate the task id and heading'),
     prioridade: z.enum(['alta', 'média', 'baixa']),
     deadline: z.string().optional().describe('YYYY-MM-DD; required for USP-entrega'),
-    assetFolder: z.string().optional().describe('Relative asset folder name (e.g. 05_Aula)'),
-    workspace: z.string().optional().describe('Workspace path for the task'),
-    dependsOn: z.array(z.string()).optional().describe('Task IDs this task depends on'),
+    body: z.string().optional().describe('Optional markdown body for generic tasks'),
+    depende: z.array(z.string()).optional().describe('Task IDs this generic task depends on'),
+    assetFolder: z
+      .string()
+      .optional()
+      .describe('Relative asset folder name (e.g. 05_Aula); USP only'),
+    workspace: z.string().optional().describe('Workspace path; USP only'),
+    dependsOn: z
+      .array(z.string())
+      .optional()
+      .describe('Task IDs; USP only (use depende for generic)'),
   },
-  async ({ projectId, type, topic, prioridade, deadline, assetFolder, workspace, dependsOn }) => {
+  async ({
+    projectId,
+    type,
+    topic,
+    prioridade,
+    deadline,
+    body,
+    depende,
+    assetFolder,
+    workspace,
+    dependsOn,
+  }) => {
     const projectFolderPath = join(PROJECTS_DIR, projectId)
+    if (type === 'generic') {
+      const result = await addTask(projectFolderPath, projectId, {
+        type: 'generic',
+        topic,
+        prioridade,
+        ...(deadline ? { deadline } : {}),
+        ...(body ? { body } : {}),
+        ...(depende && depende.length > 0 ? { depende } : {}),
+      })
+      return ok(result)
+    }
     const result = await addTask(projectFolderPath, projectId, {
       type,
       topic,
