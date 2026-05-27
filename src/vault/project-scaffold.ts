@@ -8,6 +8,8 @@ export interface ProjectScaffoldInput {
   tipo?: 'USP' | '*'
   agent?: string
   priority?: string
+  hostname?: string
+  workspaceDir?: string
   edisciplinas?: string
   horarios?: Array<{ dia: string; hora: string; local?: string | undefined }>
   contatos?: string[]
@@ -33,6 +35,9 @@ function buildProjectFrontmatter(input: ProjectScaffoldInput): string {
     `agent: '${agent}'`,
     'run_every: daily',
   ]
+
+  if (input.hostname) lines.push(`hostname: ${input.hostname}`)
+  if (input.workspaceDir) lines.push(`workspace_dir: ${input.workspaceDir}`)
 
   if (input.edisciplinas) lines.push(`edisciplinas: '${input.edisciplinas}'`)
 

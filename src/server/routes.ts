@@ -13,8 +13,6 @@ import { computeHealth } from '../pm/loki.js'
 import { getActiveRuns, activeDir } from '../pm/active.js'
 import { renderDashboard } from './dashboard.js'
 import { renderFlow } from './flow.js'
-import { syncAllRegistries, listUnprocessed, markProcessed } from '../edisciplinas/registry.js'
-import { startEdisciplinasWatcher } from '../edisciplinas/watcher.js'
 
 type SSEClient = ServerResponse
 
@@ -43,18 +41,6 @@ export class Router {
     } catch {
       /* non-fatal if watch fails */
     }
-
-    // Watch ~/Downloads/_edisciplinas_metadata.json and broadcast edisciplinas:synced
-    startEdisciplinasWatcher(config.vaultPath, (disciplineId) => {
-      const msg = `event: edisciplinas:synced\ndata: ${JSON.stringify({ disciplineId })}\n\n`
-      for (const client of this.sseClients) {
-        try {
-          client.write(msg)
-        } catch {
-          this.sseClients.delete(client)
-        }
-      }
-    })
   }
 
   private json(res: ServerResponse, data: unknown, status = 200): void {
@@ -96,16 +82,6 @@ export class Router {
     if (method === 'GET' && path === '/api/session/preview')
       return this.handleSessionPreview(req, res, url)
     if (method === 'POST' && path === '/api/session/run') return this.handleSessionRun(req, res)
-    if (path === '/api/edisciplinas/unprocessed')
-      return this.handleEdisciplinasUnprocessed(req, res)
-    if (method === 'POST' && path === '/api/edisciplinas/sync')
-      return this.handleEdisciplinasSync(req, res)
-    if (method === 'POST' && path.startsWith('/api/edisciplinas/mark/')) {
-      const parts = path.slice('/api/edisciplinas/mark/'.length).split('/')
-      const discipline = decodeURIComponent(parts[0] ?? '')
-      const hash = decodeURIComponent(parts[1] ?? '')
-      return this.handleEdisciplinasMark(req, res, discipline, hash)
-    }
     if (path === '/status') return this.handleStatus(req, res)
     if (path === '/projects') return this.handleProjects(req, res)
     if (path.startsWith('/projects/')) return this.handleProject(req, res, path.slice(10))
@@ -239,38 +215,6 @@ export class Router {
       : undefined
     const label = project ? `projeto ${project}` : drain ? 'drain' : 'execute'
     this.json(res, { started: true, message: `taverna ${label} iniciado` })
-  }
-
-  private async handleEdisciplinasUnprocessed(
-    _req: IncomingMessage,
-    res: ServerResponse,
-  ): Promise<void> {
-    const state = await this.cache.get()
-    const uspProjects = state.projects.filter((p) => p.tipo === 'USP')
-    const result: Record<string, unknown> = {}
-    for (const p of uspProjects) {
-      const items = await listUnprocessed(p.id, this.config.vaultPath).catch(() => [])
-      if (items.length > 0) result[p.id] = items
-    }
-    this.json(res, result)
-  }
-
-  private async handleEdisciplinasSync(_req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const stats = await syncAllRegistries(this.config.vaultPath)
-    this.json(res, { synced: true, stats })
-  }
-
-  private async handleEdisciplinasMark(
-    _req: IncomingMessage,
-    res: ServerResponse,
-    discipline: string,
-    hash: string,
-  ): Promise<void> {
-    if (!discipline || !hash) {
-      return this.json(res, { error: 'discipline and hash required' }, 400)
-    }
-    const marked = await markProcessed(discipline, hash, this.config.vaultPath)
-    this.json(res, { marked, discipline, hash })
   }
 
   private readBody(req: IncomingMessage): Promise<unknown> {

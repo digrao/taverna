@@ -1,13 +1,8 @@
 #!/usr/bin/env node
 import { Command } from 'commander'
-import { join, isAbsolute, resolve } from 'node:path'
-import { readdir } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import type { Dirent } from 'node:fs'
+import { join } from 'node:path'
 import { morning } from './morning/index.js'
 import { defineConfig } from './config.js'
-import { storeAssets, pullAssets, statusAssets } from './assets/index.js'
-import { syncAssets, listUnprocessed } from './edisciplinas/registry.js'
 import {
   scanVault,
   appendLogbook,
@@ -18,38 +13,16 @@ import {
 import { runAgent, runPipeline, runSession } from './pm/executor.js'
 import { snapshot, computeHealth } from './pm/loki.js'
 import { emitEvent } from './pm/event-bus.js'
-import { updateBoardFile } from './usp/board.js'
 import { writeActionRequest } from './inbox/action.js'
 import type { ActionUrgency } from './inbox/action.js'
 import { processInbox, MAX_CHARS_PER_RUN } from './inbox/index.js'
 import { migrate } from './migrate/index.js'
-import {
-  fetchEntries,
-  fetchProjects,
-  matchEntries,
-  writeDeepWorkToFrontmatter,
-} from './clockify/index.js'
-import type { ClockifyConfig } from './clockify/index.js'
-import { runScheduler, isProjectDue } from './pm/scheduler.js'
+import { runScheduler } from './pm/scheduler.js'
 import { defaultTypePolicies } from './pm/policies.js'
-import { rankProjects } from './pm/scorer.js'
 
 import type { VaultAgent, VaultProject } from './vault/index.js'
 import type { TavernaConfig } from './config.js'
 import type { ExecutorOptions } from './pm/executor.js'
-
-function getClockifyConfig(): ClockifyConfig {
-  const apiKey = process.env['CLOCKIFY_API_KEY']
-  const workspaceId = process.env['CLOCKIFY_WORKSPACE_ID']
-  const userId = process.env['CLOCKIFY_USER_ID']
-  if (!apiKey || !workspaceId || !userId) {
-    console.error(
-      'Error: CLOCKIFY_API_KEY, CLOCKIFY_WORKSPACE_ID, and CLOCKIFY_USER_ID are required',
-    )
-    process.exit(1)
-  }
-  return { apiKey, workspaceId, userId }
-}
 
 function getVaultPath(opts: { vault?: string }): string {
   const vaultPath = opts.vault ?? process.env['VAULT_PATH']
@@ -58,12 +31,6 @@ function getVaultPath(opts: { vault?: string }): string {
     process.exit(1)
   }
   return vaultPath
-}
-
-function fmtSize(bytes: number): string {
-  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`
-  if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(0)} KB`
-  return `${bytes} B`
 }
 
 async function runOnce(
@@ -197,207 +164,6 @@ program
   .action(async (opts: { vault?: string; dryRun?: boolean }) => {
     const config = defineConfig({ vaultPath: getVaultPath(opts) })
     await morning(config, { dryRun: opts.dryRun ?? false })
-  })
-
-// ── assets helpers ────────────────────────────────────────────────────────────
-
-/** Resolve a user-supplied target to an absolute path.
- *  Absolute paths are used as-is; relative paths are resolved against vaultPath. */
-function resolveAssetPath(target: string, vaultPath: string): string {
-  return isAbsolute(target) ? target : resolve(vaultPath, target)
-}
-
-/** Recursively find all directories named 'assets' within a project dir.
- *  Falls back to [projectDir] itself if none are found. */
-async function findProjectAssetsDirs(projectDir: string): Promise<string[]> {
-  const found: string[] = []
-  const recurse = async (dir: string, depth: number): Promise<void> => {
-    if (depth > 6) return
-    let entries: Dirent[]
-    try {
-      entries = await readdir(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const e of entries) {
-      if (!e.isDirectory() || e.name.startsWith('.')) continue
-      const full = join(dir, e.name)
-      if (e.name === 'assets') found.push(full)
-      else await recurse(full, depth + 1)
-    }
-  }
-  await recurse(projectDir, 0)
-  return found.length > 0 ? found : [projectDir]
-}
-
-// ── assets ────────────────────────────────────────────────────────────────────
-
-const assetsCmd = program
-  .command('assets')
-  .description('Manage heavy assets outside the vault git repo')
-
-assetsCmd
-  .command('store <target>')
-  .description('Upload assets to remote and create .asset pointer files')
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--copyparty <url>', 'Copyparty server URL')
-  .option('--gdrive', 'Also upload to Google Drive via rclone')
-  .option('--dry-run', 'Show what would be stored without uploading')
-  .option('--project', 'Treat <target> as project ID; auto-discovers assets/ subdirs')
-  .action(
-    async (
-      target: string,
-      opts: {
-        vault?: string
-        copyparty?: string
-        gdrive?: boolean
-        dryRun?: boolean
-        project?: boolean
-      },
-    ) => {
-      const vaultPath = getVaultPath(opts)
-      const config = defineConfig({
-        vaultPath,
-        ...(opts.copyparty ? { copypartyUrl: opts.copyparty } : {}),
-      })
-
-      const dirs = opts.project
-        ? await findProjectAssetsDirs(join(vaultPath, config.projectsDir, target))
-        : [resolveAssetPath(target, vaultPath)]
-
-      let totalStored = 0,
-        totalSkipped = 0,
-        totalErrors = 0
-      for (const dir of dirs) {
-        if (dirs.length > 1) console.log(`\n→ ${dir.replace(vaultPath + '/', '')}`)
-        const result = await storeAssets(dir, {
-          vaultPath,
-          extensions: config.assetExtensions,
-          ...(config.copypartyUrl ? { copypartyUrl: config.copypartyUrl } : {}),
-          ...(opts.gdrive
-            ? { gdriveRemote: config.gdriveRemote, gdriveBasePath: config.gdriveBasePath }
-            : {}),
-          ...(opts.dryRun ? { dryRun: true as const } : {}),
-        })
-        for (const f of result.stored) console.log(`  stored  ${f.replace(vaultPath + '/', '')}`)
-        for (const f of result.skipped) console.log(`  skip    ${f.replace(vaultPath + '/', '')}`)
-        for (const e of result.errors) console.error(`  error   ${e.file}: ${e.error}`)
-        totalStored += result.stored.length
-        totalSkipped += result.skipped.length
-        totalErrors += result.errors.length
-      }
-      console.log(`\n${totalStored} stored, ${totalSkipped} skipped, ${totalErrors} errors`)
-    },
-  )
-
-assetsCmd
-  .command('pull <target>')
-  .description('Download missing or modified assets from copyparty')
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--dry-run', 'Show what would be downloaded without fetching')
-  .option('--project', 'Treat <target> as project ID; auto-discovers assets/ subdirs')
-  .action(async (target: string, opts: { vault?: string; dryRun?: boolean; project?: boolean }) => {
-    const vaultPath = getVaultPath(opts)
-    const config = defineConfig({ vaultPath })
-
-    const dirs = opts.project
-      ? await findProjectAssetsDirs(join(vaultPath, config.projectsDir, target))
-      : [resolveAssetPath(target, vaultPath)]
-
-    let totalDownloaded = 0,
-      totalSkipped = 0,
-      totalErrors = 0
-    for (const dir of dirs) {
-      if (dirs.length > 1) console.log(`\n→ ${dir.replace(vaultPath + '/', '')}`)
-      const result = await pullAssets(dir, { ...(opts.dryRun ? { dryRun: true as const } : {}) })
-      for (const f of result.downloaded) console.log(`  pulled  ${f.replace(vaultPath + '/', '')}`)
-      for (const f of result.skipped) console.log(`  ok      ${f.replace(vaultPath + '/', '')}`)
-      for (const e of result.errors) console.error(`  error   ${e.file}: ${e.error}`)
-      totalDownloaded += result.downloaded.length
-      totalSkipped += result.skipped.length
-      totalErrors += result.errors.length
-    }
-    console.log(
-      `\n${totalDownloaded} downloaded, ${totalSkipped} up-to-date, ${totalErrors} errors`,
-    )
-  })
-
-assetsCmd
-  .command('status <target>')
-  .description('Show local vs remote asset state')
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--project', 'Treat <target> as project ID; auto-discovers assets/ subdirs')
-  .action(async (target: string, opts: { vault?: string; project?: boolean }) => {
-    const vaultPath = getVaultPath(opts)
-    const config = defineConfig({ vaultPath })
-
-    const dirs = opts.project
-      ? await findProjectAssetsDirs(join(vaultPath, config.projectsDir, target))
-      : [resolveAssetPath(target, vaultPath)]
-
-    const icons: Record<string, string> = {
-      ok: 'ok      ',
-      missing: 'missing ',
-      modified: 'modified',
-      'no-pointer': 'unstored',
-    }
-    let total = 0
-    for (const dir of dirs) {
-      if (dirs.length > 1) console.log(`\n→ ${dir.replace(vaultPath + '/', '')}`)
-      const statuses = await statusAssets(dir, config.assetExtensions)
-      for (const s of statuses) {
-        const size = s.size !== undefined ? ` (${fmtSize(s.size)})` : ''
-        console.log(`  ${icons[s.state]}  ${s.relativePath}${size}`)
-      }
-      total += statuses.length
-    }
-    if (total === 0) console.log('No assets found.')
-  })
-
-// ── edisciplinas ──────────────────────────────────────────────────────────────
-
-const edisciplinasCmd = program
-  .command('edisciplinas')
-  .description('Manage e-Disciplinas downloaded materials registry')
-
-edisciplinasCmd
-  .command('sync <id>')
-  .description('Sync _edisciplinas_metadata.json with .edisciplinas.json registry')
-  .option('--downloads <path>', 'Downloads directory', homedir() + '/Downloads')
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .action(async (id: string, opts: { downloads?: string; vault?: string }) => {
-    const vaultPath = getVaultPath(opts)
-    const downloads = opts.downloads ?? homedir() + '/Downloads'
-    console.log(`🔄 Syncing ${id}...`)
-    const stats = await syncAssets(id, vaultPath, downloads)
-    if (stats.message) {
-      console.log(`⚠️  ${stats.message}`)
-    } else {
-      console.log(
-        `✅ ${stats.new} new  •  ${stats.updated} updated  •  ${stats.missing} missing  (${stats.total} total)`,
-      )
-    }
-  })
-
-edisciplinasCmd
-  .command('unprocessed <id>')
-  .description('List unprocessed materials by priority')
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .action(async (id: string, opts: { vault?: string }) => {
-    const vaultPath = getVaultPath(opts)
-    const items = await listUnprocessed(id, vaultPath)
-    console.log(`\n📚 Unprocessed — ${id} (${items.length} items)`)
-    if (items.length === 0) return
-    let lastPriority = ''
-    for (const item of items) {
-      if (item.priority !== lastPriority) {
-        console.log(`\n${item.priority}`)
-        lastPriority = item.priority
-      }
-      const daysAgo = Math.floor((Date.now() - new Date(item.last_seen).getTime()) / 86_400_000)
-      console.log(`  ${item.section} / ${item.filename}  [${daysAgo}d ago]`)
-    }
-    console.log()
   })
 
 // ── run ───────────────────────────────────────────────────────────────────────
@@ -736,63 +502,6 @@ program
     },
   )
 
-// ── schedule-preview ──────────────────────────────────────────────────────────
-
-program
-  .command('schedule-preview')
-  .description('Show project run priority ranking without executing')
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--limit <n>', 'Max projects to show (default: all)', '20')
-  .action(async (opts: { vault?: string; limit?: string }) => {
-    const vaultPath = getVaultPath(opts)
-    const config = defineConfig({ vaultPath })
-    const vault = await scanVault(config)
-    const now = new Date()
-
-    const due = vault.projects.filter((p) => isProjectDue(p, now))
-    const notDue = vault.projects.filter((p) => !isProjectDue(p, now) && p.runEvery !== 'never')
-
-    const ranked = rankProjects(due, config.agentDefaults, { now })
-    const limit = Number(opts.limit ?? 20)
-
-    console.log(`\nSCHEDULE PREVIEW — ${now.toLocaleString()}\n`)
-
-    if (ranked.length === 0) {
-      console.log('  No projects due.')
-    } else {
-      console.log('ELIGIBLE (sorted by priority score):')
-      for (const { project, score, factors, agentId } of ranked.slice(0, limit)) {
-        const health = computeHealth(project)
-        const factorStr = factors
-          .map((f) => `${f.name}:${f.points > 0 ? '+' : ''}${f.points}`)
-          .join(' ')
-        const deadlineStr =
-          health.deadline_days !== undefined ? ` | deadline: ${health.deadline_days}d` : ''
-        console.log(
-          `  ${String(score).padStart(3)} pts  ${project.id.padEnd(24)} → ${agentId.padEnd(20)}  [${health.health}${deadlineStr}]  (${factorStr})`,
-        )
-      }
-    }
-
-    if (notDue.length > 0) {
-      console.log(`\nNOT DUE YET (${notDue.length} projects):`)
-      for (const p of notDue.slice(0, 5)) {
-        const freqMap: Record<string, number> = {
-          hourly: 3_600_000,
-          daily: 86_400_000,
-          weekly: 604_800_000,
-          monthly: 2_592_000_000,
-        }
-        const nextMs = p.lastRun ? new Date(p.lastRun).getTime() + (freqMap[p.runEvery] ?? 0) : 0
-        const inMin = Math.max(0, Math.round((nextMs - now.getTime()) / 60_000))
-        console.log(`  ${p.id.padEnd(24)} (${p.runEvery}, next in ${inMin}m)`)
-      }
-      if (notDue.length > 5) console.log(`  … and ${notDue.length - 5} more`)
-    }
-
-    console.log()
-  })
-
 // ── inbox ─────────────────────────────────────────────────────────────────────
 
 program
@@ -869,85 +578,6 @@ program
       console.log(`\nDone. ${result.tasksCreated.length} task(s) created.`)
     },
   )
-
-// ── clockify ──────────────────────────────────────────────────────────────────
-
-const clockifyCmd = program
-  .command('clockify')
-  .description('Sync Clockify deep work hours into vault project frontmatter')
-
-clockifyCmd
-  .command('sync')
-  .description('Fetch time entries and write deepwork stats to project frontmatter')
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--days <n>', 'Lookback window in days (default: 7)', '7')
-  .option('--dry-run', 'Show what would be written without modifying files')
-  .action(async (opts: { vault?: string; days?: string; dryRun?: boolean }) => {
-    const clockifyConfig = getClockifyConfig()
-    const vaultPath = getVaultPath(opts)
-    const tavernaConfig = defineConfig({ vaultPath })
-    const days = Number(opts.days ?? 7)
-
-    const to = new Date()
-    const from = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
-    const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-
-    const vault = await scanVault(tavernaConfig)
-    const [clockifyProjects, entries] = await Promise.all([
-      fetchProjects(clockifyConfig),
-      fetchEntries(clockifyConfig, from, to),
-    ])
-
-    const stats = matchEntries(entries, clockifyProjects, weekStart)
-    let updated = 0
-
-    for (const stat of stats) {
-      const project = vault.projects.find((p) => p.id === stat.projectId)
-      if (!project) continue
-      if (opts.dryRun) {
-        console.log(
-          `  ${stat.projectId}: ${stat.totalHours}h total, ${stat.weekHours}h week, last: ${stat.lastEntry}`,
-        )
-        continue
-      }
-      await writeDeepWorkToFrontmatter(project.filePath, stat)
-      console.log(`  updated  ${stat.projectId}`)
-      updated++
-    }
-
-    if (!opts.dryRun) {
-      console.log(`\n${updated} project(s) updated`)
-    }
-  })
-
-clockifyCmd
-  .command('status')
-  .description('Show deep work hours per project for the last 7 days')
-  .action(async () => {
-    const clockifyConfig = getClockifyConfig()
-
-    const to = new Date()
-    const from = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-
-    const [clockifyProjects, entries] = await Promise.all([
-      fetchProjects(clockifyConfig),
-      fetchEntries(clockifyConfig, from, to),
-    ])
-
-    const stats = matchEntries(entries, clockifyProjects, from)
-
-    if (stats.length === 0) {
-      console.log('No deep work logged in the last 7 days.')
-      return
-    }
-
-    stats.sort((a, b) => b.weekHours - a.weekHours)
-    for (const s of stats) {
-      console.log(`  ${s.projectId.padEnd(24)} ${s.weekHours.toFixed(1)}h`)
-    }
-    const total = stats.reduce((acc, s) => acc + s.weekHours, 0)
-    console.log(`\n  ${'Total'.padEnd(24)} ${total.toFixed(1)}h`)
-  })
 
 // ── policy ────────────────────────────────────────────────────────────────────
 
@@ -1154,36 +784,6 @@ program
           `${task.filePath.replace(vaultPath + '/', '')}  [${pct}%] BLOCKED por: ${depList}`,
         )
       }
-    }
-  })
-
-// ── usp-board ─────────────────────────────────────────────────────────────────
-
-program
-  .command('usp-board')
-  .description('Update USP health board in 20_Areas/2_Estudos/Escola Politécnica da USP.md')
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--dry-run', 'Print the generated block without writing')
-  .action(async (opts: { vault?: string; dryRun?: boolean }) => {
-    const vaultPath = getVaultPath(opts)
-    const config = defineConfig({ vaultPath })
-    const vault = await scanVault(config)
-    const uspProjects = vault.projects.filter((p) => p.tipo === 'USP')
-
-    if (uspProjects.length === 0) {
-      console.log('No USP projects found.')
-      return
-    }
-
-    const { generateBoardBlock } = await import('./usp/board.js')
-    const block = generateBoardBlock(uspProjects, new Date())
-
-    if (opts.dryRun) {
-      console.log(block)
-    } else {
-      const boardPath = join(vaultPath, '20_Areas', '2_Estudos', 'Escola Politécnica da USP.md')
-      await updateBoardFile(boardPath, uspProjects)
-      console.log(`  updated  ${boardPath.replace(vaultPath + '/', '')}`)
     }
   })
 
@@ -1640,88 +1240,6 @@ program
       console.log(`\n  … e mais ${rows.length - limit} projeto(s) — use --limit para ver mais`)
     }
     console.log()
-  })
-
-// ── blog ──────────────────────────────────────────────────────────────────────
-
-const blogCmd = program.command('blog').description('Blog post deployment tools')
-
-blogCmd
-  .command('deploy')
-  .description('Deploy vault posts (20_Areas/8_Posts/) to the blog project directory')
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--blog-dir <path>', 'Blog project directory (default: ~/Projetos/blog)')
-  .option('--dry-run', 'Show what would be deployed without writing files')
-  .action(async (opts: { vault?: string; blogDir?: string; dryRun?: boolean }) => {
-    const { deployPosts, defaultBlogDir } = await import('./blog/index.js')
-    const vaultPath = getVaultPath(opts)
-    const blogDir = opts.blogDir ?? defaultBlogDir()
-
-    const result = await deployPosts(vaultPath, {
-      blogDir,
-      ...(opts.dryRun !== undefined ? { dryRun: opts.dryRun } : {}),
-    })
-
-    if (opts.dryRun) {
-      console.log(`\nDry run — blog dir: ${blogDir}`)
-    }
-    for (const f of result.deployed) {
-      console.log(`  ${opts.dryRun ? '(would deploy)' : 'deployed'} ${f}`)
-    }
-    for (const { file, error } of result.errors) {
-      console.error(`  error ${file}: ${error}`)
-    }
-    if (result.deployed.length === 0 && result.errors.length === 0) {
-      console.log('  No posts found in 20_Areas/8_Posts/')
-    }
-    console.log()
-  })
-
-// ── policies-ci ────────────────────────────────────────────────────────────────
-
-program
-  .command('policies-ci [project-id]')
-  .description('Show effective CI/CD build policies (from ~/tools/policies.yaml)')
-  .option('--dry-run', 'Show resolved policies without executing anything')
-  .action(async (projectId: string | undefined) => {
-    try {
-      const { PolicyResolver } = await import('./pm/policy.js')
-
-      const resolver = new PolicyResolver()
-
-      if (projectId) {
-        // Show policy for specific project
-        const policy = resolver.getProjectPolicy(projectId)
-        console.log(`\nProject Policy: ${projectId}`)
-        console.log('─'.repeat(60))
-        console.log(`Description: ${policy.description}`)
-        console.log(`Build Type: ${policy.build_type}`)
-        console.log(`Test Enabled: ${policy.test_enabled}`)
-        console.log(`Deploy Enabled: ${policy.deploy_enabled}`)
-        if (policy.deploy_env) console.log(`Deploy Environment: ${policy.deploy_env}`)
-        if (policy.service_name) console.log(`Service Name: ${policy.service_name}`)
-        console.log(`Auto Trigger: ${policy.auto_trigger}`)
-        if (policy.dependencies.length > 0) {
-          console.log(`Dependencies: ${policy.dependencies.join(', ')}`)
-        }
-        if (policy.pre_deploy.length > 0) {
-          console.log(`Pre-Deploy Hooks: ${policy.pre_deploy.length}`)
-          policy.pre_deploy.forEach((hook) => console.log(`  - ${hook}`))
-        }
-        if (policy.post_deploy.length > 0) {
-          console.log(`Post-Deploy Hooks: ${policy.post_deploy.length}`)
-          policy.post_deploy.forEach((hook) => console.log(`  - ${hook}`))
-        }
-      } else {
-        // Show all policies
-        console.log(resolver.formatPolicyReport())
-      }
-    } catch (error) {
-      console.error(
-        `Error reading policies: ${error instanceof Error ? error.message : String(error)}`,
-      )
-      process.exit(1)
-    }
   })
 
 // ── mcp ───────────────────────────────────────────────────────────────────────

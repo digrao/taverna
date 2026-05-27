@@ -1,11 +1,7 @@
-import { join } from 'node:path'
 import { scanVault, sortByPriority, getPendingTasks, readLogbook } from '../vault/index.js'
 import { writeInbox } from '../vault/index.js'
-import { updateBoardFile } from '../usp/board.js'
 import type { TavernaConfig } from '../config.js'
 import type { VaultProject, LogbookEntry } from '../vault/types.js'
-import { syncAllRegistries, listUnprocessed } from '../edisciplinas/registry.js'
-import type { SyncStats } from '../edisciplinas/registry.js'
 
 function isYesterday(timestamp: string, today: Date): boolean {
   const d = new Date(timestamp)
@@ -47,35 +43,6 @@ function formatProjectSection(project: VaultProject): string {
   return out
 }
 
-async function buildEdisciplinasTable(
-  uspProjects: VaultProject[],
-  vaultPath: string,
-): Promise<string> {
-  const allStats = await syncAllRegistries(vaultPath).catch(() => ({}) as Record<string, SyncStats>)
-
-  const rows: string[] = []
-  for (const p of uspProjects) {
-    const items = await listUnprocessed(p.id, vaultPath).catch(() => [])
-    const stats = allStats[p.id]
-    const newCount = stats?.new ?? 0
-    const pendingCount = items.length
-
-    if (newCount === 0 && pendingCount === 0) continue
-    rows.push(`| ${p.id} | ${newCount} | ${pendingCount} |`)
-  }
-
-  if (rows.length === 0) return ''
-
-  return [
-    '## e-Disciplinas',
-    '',
-    '| Disciplina | Novos | Não processados |',
-    '|------------|-------|-----------------|',
-    ...rows,
-    '',
-  ].join('\n')
-}
-
 export async function morning(
   config: TavernaConfig,
   opts: { dryRun?: boolean; date?: Date } = {},
@@ -94,13 +61,9 @@ export async function morning(
 
   // Today's projects sorted by priority
   const sorted = sortByPriority(state.projects)
-  const uspProjects = state.projects.filter((p) => p.tipo === 'USP')
 
   const pad = (n: number) => String(n).padStart(2, '0')
   const dateStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
-
-  // Build e-Disciplinas table before constructing the markdown
-  const edisciplinasTable = await buildEdisciplinasTable(uspProjects, config.vaultPath)
 
   const lines: string[] = [`# Morning Brief — ${dateStr}`, '']
 
@@ -111,10 +74,6 @@ export async function morning(
     lines.push('## Ontem')
     lines.push('_nenhuma execução registrada_')
     lines.push('')
-  }
-
-  if (edisciplinasTable) {
-    lines.push(edisciplinasTable)
   }
 
   lines.push('## Hoje')
@@ -131,18 +90,6 @@ export async function morning(
   } else {
     const filename = config.morningFilename(today)
     await writeInbox(markdown, filename, config)
-
-    // Update USP health board in the vault
-    const uspProjects = state.projects.filter((p) => p.tipo === 'USP')
-    if (uspProjects.length > 0) {
-      const boardPath = join(
-        config.vaultPath,
-        '20_Areas',
-        '2_Estudos',
-        'Escola Politécnica da USP.md',
-      )
-      await updateBoardFile(boardPath, uspProjects)
-    }
   }
 
   return markdown

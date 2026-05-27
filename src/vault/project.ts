@@ -9,14 +9,7 @@ import {
   getStringArray,
 } from './frontmatter.js'
 import { readProjectTasks } from './task.js'
-import type {
-  VaultProject,
-  ProjectType,
-  RawFrontmatter,
-  USPProject,
-  BBProject,
-  MetaProject,
-} from './types.js'
+import type { VaultProject, ProjectType, RawFrontmatter } from './types.js'
 
 // Add entries here to support new types or legacy aliases
 const TIPO_ALIASES: Record<string, ProjectType> = {
@@ -72,8 +65,6 @@ export async function readProject(filePath: string, uspPrefixes: string[]): Prom
     lastStatusRaw === 'success' || lastStatusRaw === 'failed' ? lastStatusRaw : undefined
   const runsTotal = typeof data['_runs_total'] === 'number' ? data['_runs_total'] : 0
 
-  const _actualFolderPath = dirname(filePath) !== filePath ? dirname(filePath) : undefined
-  // For loose files, folderPath is undefined (they're directly in projectsDir)
   const resolvedFolderPath = folderPath
 
   const hasTasksFolder = resolvedFolderPath != null && existsSync(join(resolvedFolderPath, 'tasks'))
@@ -81,8 +72,32 @@ export async function readProject(filePath: string, uspPrefixes: string[]): Prom
     resolvedFolderPath != null && existsSync(join(resolvedFolderPath, 'assets'))
   const tasks = resolvedFolderPath != null ? await readProjectTasks(resolvedFolderPath) : []
 
-  const base = {
+  const hostname = getString(data, 'hostname')
+  const workspaceDir = getString(data, 'workspace_dir') ?? getString(data, 'workspaceDir')
+
+  const edisciplinas = getString(data, 'edisciplinas')
+  const contatos = getStringArray(data, 'contatos')
+  const horariosRaw = data['horarios']
+  const horarios = Array.isArray(horariosRaw)
+    ? horariosRaw
+        .filter((h): h is Record<string, unknown> => h != null && typeof h === 'object')
+        .map((h) => ({
+          dia: typeof h['dia'] === 'string' ? h['dia'] : '',
+          ...(typeof h['hora'] === 'string' ? { hora: h['hora'] } : {}),
+          ...(typeof h['local'] === 'string' ? { local: h['local'] } : {}),
+        }))
+        .filter((h) => h.dia !== '')
+    : undefined
+
+  const cardId = getString(data, 'cardId')
+  const sourceRaw = data['source']
+  const source = Array.isArray(sourceRaw)
+    ? sourceRaw.filter((x): x is string => typeof x === 'string')
+    : undefined
+
+  return {
     id,
+    tipo,
     name: detectionName,
     filePath,
     ...(resolvedFolderPath != null ? { folderPath: resolvedFolderPath } : {}),
@@ -98,46 +113,14 @@ export async function readProject(filePath: string, uspPrefixes: string[]): Prom
     hasAssetsFolder,
     content,
     raw: data,
+    ...(hostname ? { hostname } : {}),
+    ...(workspaceDir ? { workspaceDir } : {}),
+    ...(edisciplinas != null ? { edisciplinas } : {}),
+    ...(contatos.length > 0 ? { contatos } : {}),
+    ...(horarios?.length ? { horarios } : {}),
+    ...(cardId != null ? { cardId } : {}),
+    ...(source?.length ? { source } : {}),
   }
-
-  if (tipo === 'USP') {
-    const edisciplinas = getString(data, 'edisciplinas')
-    const contatos = getStringArray(data, 'contatos')
-    const horariosRaw = data['horarios']
-    const horarios = Array.isArray(horariosRaw)
-      ? horariosRaw
-          .filter((h): h is Record<string, unknown> => h != null && typeof h === 'object')
-          .map((h) => ({
-            dia: typeof h['dia'] === 'string' ? h['dia'] : '',
-            ...(typeof h['hora'] === 'string' ? { hora: h['hora'] } : {}),
-            ...(typeof h['local'] === 'string' ? { local: h['local'] } : {}),
-          }))
-          .filter((h) => h.dia !== '')
-      : undefined
-    return {
-      ...base,
-      tipo: 'USP',
-      ...(edisciplinas != null ? { edisciplinas } : {}),
-      ...(contatos.length > 0 ? { contatos } : {}),
-      ...(horarios != null && horarios.length > 0 ? { horarios } : {}),
-    } as USPProject
-  }
-
-  if (tipo === 'BB') {
-    const cardId = getString(data, 'cardId')
-    const sourceRaw = data['source']
-    const source = Array.isArray(sourceRaw)
-      ? sourceRaw.filter((x): x is string => typeof x === 'string')
-      : undefined
-    return {
-      ...base,
-      tipo: 'BB',
-      ...(cardId != null ? { cardId } : {}),
-      ...(source != null ? { source } : {}),
-    } as BBProject
-  }
-
-  return { ...base, tipo: '*' } as MetaProject
 }
 
 export async function scanProjects(

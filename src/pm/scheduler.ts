@@ -1,3 +1,4 @@
+import { hostname as osHostname } from 'node:os'
 import type { TavernaConfig } from '../config.js'
 import type { VaultProject, ProjectType, RawFrontmatter } from '../vault/types.js'
 import { scanVault, appendLogbook } from '../vault/index.js'
@@ -116,6 +117,7 @@ export async function runScheduler(
     const eligible: VaultProject[] = []
     for (const project of vault.projects) {
       if (!isProjectDue(project, now)) continue
+      if (project.hostname && project.hostname !== osHostname()) continue
 
       const runWindow =
         typeof project.raw['run_window'] === 'string'

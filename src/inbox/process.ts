@@ -15,6 +15,14 @@ export interface InboxFile {
   content: string
 }
 
+/** Lazy-loading inbox item: frontmatter always present, body loaded on demand. */
+export interface InboxItem {
+  path: string
+  filename: string
+  frontmatter: Record<string, unknown>
+  body?: string
+}
+
 export interface Classification {
   file: string
   cluster: string
@@ -24,8 +32,34 @@ export interface Classification {
 export interface ProcessResult {
   processed: number
   skipped: number
+  shortCircuited: number
   errors: Array<{ file: string; error: string }>
   dryRun?: Classification[]
+}
+
+export async function loadFrontmatter(filePath: string): Promise<InboxItem> {
+  const raw = await readFile(filePath, 'utf8')
+  const parsed = matter(raw)
+  return { path: filePath, filename: basename(filePath), frontmatter: parsed.data }
+}
+
+export async function loadBody(item: InboxItem): Promise<InboxItem> {
+  if (item.body !== undefined) return item
+  const raw = await readFile(item.path, 'utf8')
+  const parsed = matter(raw)
+  return { ...item, body: parsed.content }
+}
+
+function deriveCluster(fm: Record<string, unknown>): string | null {
+  if (fm['status'] === 'done') return 'done'
+  if (typeof fm['type'] === 'string' && typeof fm['projeto'] === 'string') return fm['type']
+  if (typeof fm['projeto'] === 'string') return 'projetos'
+  if (typeof fm['type'] === 'string') return fm['type']
+  return null
+}
+
+export function canRouteByFrontmatter(fm: Record<string, unknown>): boolean {
+  return deriveCluster(fm) !== null
 }
 
 export async function scanInbox(inboxDir: string): Promise<InboxFile[]> {
@@ -53,17 +87,9 @@ export function selectBatch(files: InboxFile[], maxChars: number): InboxFile[] {
 }
 
 export function buildPrompt(directiveText: string, batch: InboxFile[]): string {
-  const items = batch
-    .map(f => `### ${f.filename}\n${f.content.trim()}`)
-    .join('\n\n---\n\n')
+  const items = batch.map((f) => `### ${f.filename}\n${f.content.trim()}`).join('\n\n---\n\n')
 
-  return [
-    directiveText.trim(),
-    '',
-    '## Notas para classificar',
-    '',
-    items,
-  ].join('\n')
+  return [directiveText.trim(), '', '## Notas para classificar', '', items].join('\n')
 }
 
 function spawnClaude(prompt: string): Promise<string> {
@@ -73,13 +99,17 @@ function spawnClaude(prompt: string): Promise<string> {
     })
     let stdout = ''
     let stderr = ''
-    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
-    proc.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
+    proc.stdout.on('data', (d: Buffer) => {
+      stdout += d.toString()
+    })
+    proc.stderr.on('data', (d: Buffer) => {
+      stderr += d.toString()
+    })
     const timer = setTimeout(() => {
       proc.kill('SIGTERM')
       reject(new Error(`claude timed out after ${TIMEOUT_MS}ms`))
     }, TIMEOUT_MS)
-    proc.on('close', code => {
+    proc.on('close', (code) => {
       clearTimeout(timer)
       if (code === 0) resolve(stdout)
       else reject(new Error(`claude exited ${code}: ${stderr.slice(0, 200)}`))
@@ -108,11 +138,7 @@ async function addRelevancia(filePath: string, relevancia: number): Promise<void
   await writeFile(filePath, matter.stringify(parsed.content, parsed.data), 'utf8')
 }
 
-async function moveToArchive(
-  filePath: string,
-  archiveDir: string,
-  cluster: string,
-): Promise<void> {
+async function moveToArchive(filePath: string, archiveDir: string, cluster: string): Promise<void> {
   const destDir = join(archiveDir, cluster)
   await mkdir(destDir, { recursive: true })
   const dest = join(destDir, basename(filePath))
@@ -132,7 +158,7 @@ export async function processInbox(
     'directives.md',
   )
 
-  const result: ProcessResult = { processed: 0, skipped: 0, errors: [] }
+  const result: ProcessResult = { processed: 0, skipped: 0, shortCircuited: 0, errors: [] }
 
   // Load directive
   if (!existsSync(directivesPath)) {
@@ -155,7 +181,7 @@ export async function processInbox(
   if (opts.dryRun) {
     const prompt = buildPrompt(directiveText, batch)
     console.log(`--- PROMPT (${prompt.length} chars) ---\n${prompt}\n---`)
-    result.dryRun = batch.map(f => ({ file: f.filename, cluster: 'dry-run', relevancia: 0 }))
+    result.dryRun = batch.map((f) => ({ file: f.filename, cluster: 'dry-run', relevancia: 0 }))
     return result
   }
 
@@ -174,11 +200,14 @@ export async function processInbox(
   try {
     classifications = parseClassifications(output)
   } catch (e) {
-    result.errors.push({ file: '(parse)', error: `${String(e)}\nRaw output:\n${output.slice(0, 500)}` })
+    result.errors.push({
+      file: '(parse)',
+      error: `${String(e)}\nRaw output:\n${output.slice(0, 500)}`,
+    })
     return result
   }
 
-  const classMap = new Map(classifications.map(c => [c.file, c]))
+  const classMap = new Map(classifications.map((c) => [c.file, c]))
 
   for (const f of batch) {
     const cls = classMap.get(f.filename)

@@ -4,7 +4,14 @@ export type Priority = 'high' | 'medium' | 'low'
 
 export type RunEvery = 'hourly' | 'daily' | 'weekly' | 'monthly' | 'never'
 
-export type TaskState = 'backlog' | 'tarefinha' | 'tarefa' | 'em-progresso' | 'aguardando_humano' | 'bloqueada' | 'concluida'
+export type TaskState =
+  | 'backlog'
+  | 'tarefinha'
+  | 'tarefa'
+  | 'em-progresso'
+  | 'aguardando_humano'
+  | 'bloqueada'
+  | 'concluida'
 
 export type UspTaskType = 'USP-aula' | 'USP-entrega'
 
@@ -26,9 +33,9 @@ export interface VaultTask {
   state: TaskState
   // USP task classification
   taskType?: UspTaskType
-  pipelineStage?: string   // pipeline.stage from frontmatter
-  workspace?: string       // workspace: path for USP-entrega
-  parent?: string          // parent discipline id
+  pipelineStage?: string // pipeline.stage from frontmatter
+  workspace?: string // workspace: path for USP-entrega
+  parent?: string // parent discipline id
   // Artefatos que o humano precisa entregar antes de o agente prosseguir
   requerHumano?: string[]
   // Bloqueio técnico detectado pelo agente
@@ -52,7 +59,7 @@ export interface VaultAgent {
   permissions?: string[]
 }
 
-export interface BaseProject {
+export interface VaultProject {
   id: string
   tipo: ProjectType
   name: string
@@ -70,26 +77,17 @@ export interface BaseProject {
   hasAssetsFolder: boolean
   content: string
   raw: RawFrontmatter
-}
-
-export interface USPProject extends BaseProject {
-  tipo: 'USP'
+  // multi-host scheduling
+  hostname?: string
+  workspaceDir?: string
+  // USP-specific (optional)
   edisciplinas?: string
   horarios?: Array<{ dia: string; hora?: string; local?: string }>
   contatos?: string[]
-}
-
-export interface BBProject extends BaseProject {
-  tipo: 'BB'
+  // BB-specific (optional)
   cardId?: string
   source?: string[]
 }
-
-export interface MetaProject extends BaseProject {
-  tipo: '*'
-}
-
-export type VaultProject = USPProject | BBProject | MetaProject
 
 export interface LogbookEntry {
   timestamp: string

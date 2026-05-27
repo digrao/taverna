@@ -2,7 +2,6 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { join } from 'node:path'
-import { syncAssets, listUnprocessed } from '../edisciplinas/registry.js'
 import { addTask } from '../vault/task-scaffold.js'
 import { scaffoldProject } from '../vault/project-scaffold.js'
 import { features } from '../infra/feature-map.js'
@@ -148,55 +147,6 @@ server.tool(
       ...(contatos ? { contatos } : {}),
     })
     return ok(result)
-  },
-)
-
-// ── e-Disciplinas tools ────────────────────────────────────────────────────────
-// These will be removed in the prune task (task 57) when edisciplinas moves to
-// its own subproject.
-
-server.tool(
-  'taverna_sync_all',
-  'Sync all e-Disciplinas registries for every discipline that has a .edisciplinas.json registry',
-  {},
-  async () => {
-    const { syncAllRegistries } = await import('../edisciplinas/registry.js')
-    const stats = await syncAllRegistries(VAULT_PATH)
-    return ok({ synced: true, stats })
-  },
-)
-
-server.tool(
-  'taverna_mark_processed',
-  'Mark an e-Disciplinas material as processed by discipline ID and URL hash',
-  {
-    id: z.string().describe('Discipline ID (e.g. PSI3451)'),
-    hash: z.string().describe('URL hash of the item to mark as processed (url_hash field)'),
-  },
-  async ({ id, hash }) => {
-    const { markProcessed } = await import('../edisciplinas/registry.js')
-    const marked = await markProcessed(id, hash, VAULT_PATH)
-    return ok({ marked, id, hash })
-  },
-)
-
-server.tool(
-  'taverna_sync_assets',
-  'Sync _edisciplinas_metadata.json with the discipline registry (.edisciplinas.json)',
-  { id: z.string().describe('Discipline ID (e.g. PSI3451)') },
-  async ({ id }) => {
-    const stats = await syncAssets(id, VAULT_PATH)
-    return { content: [{ type: 'text' as const, text: JSON.stringify(stats) }] }
-  },
-)
-
-server.tool(
-  'taverna_list_unprocessed',
-  'List unprocessed e-Disciplinas materials by priority for a discipline',
-  { id: z.string().describe('Discipline ID (e.g. PSI3451)') },
-  async ({ id }) => {
-    const items = await listUnprocessed(id, VAULT_PATH)
-    return { content: [{ type: 'text' as const, text: JSON.stringify(items) }] }
   },
 )
 
