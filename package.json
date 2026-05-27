@@ -11,20 +11,40 @@
     "dev": "tsx src/cli.ts",
     "morning": "VAULT_PATH=${VAULT_PATH:-/home/jvcm/tmp} tsx src/cli.ts morning",
     "morning:dry": "VAULT_PATH=${VAULT_PATH:-/home/jvcm/tmp} tsx src/cli.ts morning --dry-run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests",
+    "lint:fix": "eslint src tests --fix",
+    "format": "prettier --write src tests",
+    "format:check": "prettier --check src tests",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit"
+    "ci": "npm run typecheck && npm run lint && npm run test",
+    "prepare": "simple-git-hooks"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^12.0.0",
-    "gray-matter": "^4.0.3"
+    "gray-matter": "^4.0.3",
+    "neo-matrix": "file:../neo-matrix",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "^1.6.0",
+    "eslint": "^10.4.0",
+    "lint-staged": "^17.0.5",
+    "prettier": "^3.8.3",
+    "simple-git-hooks": "^2.13.1",
     "tsx": "^4.0.0",
     "typescript": "^5.4.0",
+    "typescript-eslint": "^8.60.0",
     "vitest": "^1.6.0"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "npx lint-staged"
+  },
+  "lint-staged": {
+    "*.ts": ["eslint --fix", "prettier --write"]
   }
 }

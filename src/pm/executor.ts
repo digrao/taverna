@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { appendFileSync, writeFileSync, unlinkSync } from 'node:fs'
+import { writeFileSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { VaultAgent, VaultProject } from '../vault/types.js'
@@ -10,8 +10,15 @@ import { buildPrompt } from './prompt.js'
 import { parseActionRequired } from '../inbox/action.js'
 import { log } from './loki.js'
 import { resolvePolicy } from './policy-resolver.js'
-import { checkBudget, recordCost } from './budget.js'
-import { matrixConfigFromEnv, sendMatrixMessage, formatAgentRunMessage, formatActionRequiredMessage } from './matrix.js'
+import { checkBudget, recordCost, loadVaultBudgetConfig } from './budget.js'
+import type { BudgetConfig } from './budget.js'
+import {
+  matrixConfigFromEnv,
+  sendMatrixMessage,
+  formatAgentRunMessage,
+  formatActionRequiredMessage,
+  formatAgentStartMessage,
+} from './matrix.js'
 import { markActive, markInactive } from './active.js'
 
 export interface ExecutorOptions {
@@ -42,7 +49,7 @@ export interface AgentResult {
 }
 
 export function parseResultado(output: string): string | undefined {
-  const line = output.split('\n').find(l => l.startsWith('RESULTADO:'))
+  const line = output.split('\n').find((l) => l.startsWith('RESULTADO:'))
   return line ? line.replace(/^RESULTADO:\s*/, '').trim() || undefined : undefined
 }
 
@@ -64,7 +71,9 @@ function openTmuxSession(sessionName: string, logFile: string): string | undefin
 function killTmuxSession(sessionName: string): void {
   try {
     spawn('tmux', ['kill-session', '-t', sessionName], { stdio: 'ignore', detached: true }).unref()
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 interface ClaudeJsonResult {
@@ -76,13 +85,17 @@ function parseClaudeJson(raw: string): ClaudeJsonResult {
   try {
     const parsed = JSON.parse(raw)
     const u = parsed?.usage
-    const usage: TokenUsage | undefined = u ? {
-      tokensIn:  u.input_tokens ?? 0,
-      tokensOut: u.output_tokens ?? 0,
-      cacheRead: u.cache_read_input_tokens ?? 0,
-      cacheFill: u.cache_creation_input_tokens ?? 0,
-    } : undefined
-    return usage ? { text: String(parsed?.result ?? raw), usage } : { text: String(parsed?.result ?? raw) }
+    const usage: TokenUsage | undefined = u
+      ? {
+          tokensIn: u.input_tokens ?? 0,
+          tokensOut: u.output_tokens ?? 0,
+          cacheRead: u.cache_read_input_tokens ?? 0,
+          cacheFill: u.cache_creation_input_tokens ?? 0,
+        }
+      : undefined
+    return usage
+      ? { text: String(parsed?.result ?? raw), usage }
+      : { text: String(parsed?.result ?? raw) }
   } catch {
     return { text: raw }
   }
@@ -117,22 +130,34 @@ function spawnClaude(
 
     let stdout = ''
     let stderr = ''
-    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
-    proc.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
+    proc.stdout.on('data', (d: Buffer) => {
+      stdout += d.toString()
+    })
+    proc.stderr.on('data', (d: Buffer) => {
+      stderr += d.toString()
+    })
 
     const timer = setTimeout(() => {
       proc.kill('SIGTERM')
       reject(new Error(`claude timed out after ${timeoutMs}ms`))
     }, timeoutMs)
 
-    proc.on('close', code => {
+    proc.on('close', (code) => {
       clearTimeout(timer)
       const parsed = parseClaudeJson(stdout)
       if (logFile) {
-        try { writeFileSync(logFile, parsed.text) } catch { /* ignore */ }
+        try {
+          writeFileSync(logFile, parsed.text)
+        } catch {
+          /* ignore */
+        }
         setTimeout(() => {
           killTmuxSession(sessionName!)
-          try { unlinkSync(logFile) } catch { /* ignore */ }
+          try {
+            unlinkSync(logFile)
+          } catch {
+            /* ignore */
+          }
         }, 3000)
       }
       if (code === 0) resolve(parsed)
@@ -182,31 +207,101 @@ export async function runAgent(
   const projectLabel = project.id
 
   if (hasCycle(project.tasks)) {
-    log({ event: 'agent_run', project: projectLabel, agent: agentLabel, status: 'failed', duration_s: 0 })
-    return { success: false, output: '', durationMs: 0, error: 'BLOCKED: circular dependency detected' }
-  }
-
-  const allPending = project.tasks.filter(t => t.progresso < 100)
-  if (allPending.length > 0) {
-    const unblocked = allPending.filter(t => !isBlocked(t, project.tasks).blocked)
-    if (unblocked.length === 0) {
-      log({ event: 'agent_run', project: projectLabel, agent: agentLabel, status: 'failed', duration_s: 0 })
-      return { success: false, output: '', durationMs: 0, error: 'BLOCKED: all pending tasks have unsatisfied dependencies' }
+    log({
+      event: 'agent_run',
+      project: projectLabel,
+      agent: agentLabel,
+      status: 'failed',
+      duration_s: 0,
+    })
+    return {
+      success: false,
+      output: '',
+      durationMs: 0,
+      error: 'BLOCKED: circular dependency detected',
     }
   }
 
-  // Budget check — read limit from project frontmatter (budget_usd_daily)
+  const allPending = project.tasks.filter((t) => t.progresso < 100)
+  if (allPending.length > 0) {
+    const unblocked = allPending.filter((t) => !isBlocked(t, project.tasks).blocked)
+    if (unblocked.length === 0) {
+      log({
+        event: 'agent_run',
+        project: projectLabel,
+        agent: agentLabel,
+        status: 'failed',
+        duration_s: 0,
+      })
+      return {
+        success: false,
+        output: '',
+        durationMs: 0,
+        error: 'BLOCKED: all pending tasks have unsatisfied dependencies',
+      }
+    }
+  }
+
+  // Budget checks
   const vaultPath = opts?.vaultPath
   if (vaultPath) {
-    const limitUsd = typeof project.raw['budget_usd_daily'] === 'number'
-      ? project.raw['budget_usd_daily'] as number
-      : undefined
-    const budget = checkBudget(vaultPath, projectLabel, limitUsd)
-    if (!budget.allowed) {
-      log({ event: 'agent_run', project: projectLabel, agent: agentLabel, status: 'failed', duration_s: 0 })
-      return {
-        success: false, output: '', durationMs: 0,
-        error: `BUDGET: limite diário atingido ($${budget.spent.toFixed(4)} / $${budget.limit?.toFixed(2)})`,
+    // 1. Global token budget (from taverna.config.yaml)
+    const globalConfig = loadVaultBudgetConfig(vaultPath)
+    if (globalConfig.tokens_daily !== undefined || globalConfig.usd_daily !== undefined) {
+      const globalBudget = checkBudget(vaultPath, '__global__', globalConfig)
+      if (!globalBudget.allowed) {
+        log({
+          event: 'agent_run',
+          project: projectLabel,
+          agent: agentLabel,
+          status: 'failed',
+          duration_s: 0,
+        })
+        const detail =
+          globalBudget.limit_tokens !== undefined
+            ? `${globalBudget.spent_tokens} / ${globalBudget.limit_tokens} tokens`
+            : `$${globalBudget.spent_usd.toFixed(4)} / $${globalBudget.limit_usd?.toFixed(2)}`
+        return {
+          success: false,
+          output: '',
+          durationMs: 0,
+          error: `BUDGET: global budget excedido (${detail})`,
+        }
+      }
+    }
+
+    // 2. Per-project budget (budget_usd_daily / budget_tokens_daily in frontmatter)
+    const projectBudgetConfig: BudgetConfig = {
+      ...(typeof project.raw['budget_usd_daily'] === 'number'
+        ? { usd_daily: project.raw['budget_usd_daily'] as number }
+        : {}),
+      ...(typeof project.raw['budget_tokens_daily'] === 'number'
+        ? { tokens_daily: project.raw['budget_tokens_daily'] as number }
+        : {}),
+    }
+    if (
+      projectBudgetConfig.usd_daily !== undefined ||
+      projectBudgetConfig.tokens_daily !== undefined
+    ) {
+      const budget = checkBudget(vaultPath, projectLabel, projectBudgetConfig)
+      if (!budget.allowed) {
+        log({
+          event: 'agent_run',
+          project: projectLabel,
+          agent: agentLabel,
+          status: 'failed',
+          duration_s: 0,
+        })
+        const detail =
+          budget.limit_tokens !== undefined
+            ? `${budget.spent_tokens} / ${budget.limit_tokens} tokens`
+            : `$${budget.spent_usd.toFixed(4)} / $${budget.limit_usd?.toFixed(2)}`
+        return {
+          success: false,
+          output: '',
+          durationMs: 0,
+          error: `BUDGET: limite diário atingido (${detail})`,
+        }
       }
     }
   }
@@ -220,9 +315,7 @@ export async function runAgent(
   // tmux session name: taverna-dev-agent-taverna (visible via `tmux ls`)
   const sessionName = `taverna-${agentLabel.replace('@', '')}-${projectLabel}`
   const sessionId = randomUUID()
-  const pendingTaskPaths = project.tasks
-    .filter(t => t.progresso < 100)
-    .map(t => t.filePath)
+  const pendingTaskPaths = project.tasks.filter((t) => t.progresso < 100).map((t) => t.filePath)
 
   // Write session ID to pending tasks now so the user can resume with
   // `claude --resume <_session_id>` if the agent requests intervention.
@@ -230,10 +323,32 @@ export async function runAgent(
     await markTasksInProgress(pendingTaskPaths, sessionId)
   }
 
-  markActive({ project: projectLabel, agent: agentLabel, sessionId, startedAt: new Date().toISOString() })
+  markActive({
+    project: projectLabel,
+    agent: agentLabel,
+    sessionId,
+    startedAt: new Date().toISOString(),
+    tmuxSession: sessionName,
+  })
+  const matrixCfgStart = matrixConfigFromEnv()
+  if (matrixCfgStart) {
+    sendMatrixMessage(
+      matrixCfgStart,
+      formatAgentStartMessage(projectLabel, agentLabel, sessionName, sessionId),
+    ).catch(() => {
+      /* non-fatal */
+    })
+  }
   const start = Date.now()
   try {
-    const { text, usage } = await spawnClaude(prompt, permissionMode, timeoutMs, allowedTools, sessionName, sessionId)
+    const { text, usage } = await spawnClaude(
+      prompt,
+      permissionMode,
+      timeoutMs,
+      allowedTools,
+      sessionName,
+      sessionId,
+    )
     const durationMs = Date.now() - start
     const resultado = parseResultado(text)
     const actionRequired = parseActionRequired(text)
@@ -242,15 +357,33 @@ export async function runAgent(
     }
     // Sonnet 4.6 pricing: $3/MTok in, $15/MTok out, $3.75/MTok cache_fill, $0.30/MTok cache_read
     const cost_usd = usage
-      ? Math.round((usage.tokensIn * 3 + usage.tokensOut * 15 + usage.cacheFill * 3.75 + usage.cacheRead * 0.30) / 1_000_000 * 10_000) / 10_000
+      ? Math.round(
+          ((usage.tokensIn * 3 +
+            usage.tokensOut * 15 +
+            usage.cacheFill * 3.75 +
+            usage.cacheRead * 0.3) /
+            1_000_000) *
+            10_000,
+        ) / 10_000
       : undefined
-    const cache_hit_pct = usage && (usage.tokensIn + usage.cacheRead) > 0
-      ? Math.round(usage.cacheRead / (usage.tokensIn + usage.cacheRead) * 1000) / 10
-      : undefined
+    const cache_hit_pct =
+      usage && usage.tokensIn + usage.cacheRead > 0
+        ? Math.round((usage.cacheRead / (usage.tokensIn + usage.cacheRead)) * 1000) / 10
+        : undefined
     log({
-      event: 'agent_run', project: projectLabel, agent: agentLabel, status: 'success',
+      event: 'agent_run',
+      project: projectLabel,
+      agent: agentLabel,
+      status: 'success',
       duration_s: Math.round(durationMs / 100) / 10,
-      ...(usage ? { tokens_in: usage.tokensIn, tokens_out: usage.tokensOut, cache_read: usage.cacheRead, cache_fill: usage.cacheFill } : {}),
+      ...(usage
+        ? {
+            tokens_in: usage.tokensIn,
+            tokens_out: usage.tokensOut,
+            cache_read: usage.cacheRead,
+            cache_fill: usage.cacheFill,
+          }
+        : {}),
       ...(cost_usd !== undefined ? { cost_usd } : {}),
       ...(cache_hit_pct !== undefined ? { cache_hit_pct } : {}),
     })
@@ -259,7 +392,24 @@ export async function runAgent(
 
     // Record cost in ledger
     if (vaultPath && cost_usd !== undefined) {
-      try { recordCost(vaultPath, projectLabel, agentLabel, cost_usd) } catch { /* non-fatal */ }
+      try {
+        recordCost(
+          vaultPath,
+          projectLabel,
+          agentLabel,
+          cost_usd,
+          usage
+            ? {
+                in: usage.tokensIn,
+                out: usage.tokensOut,
+                cache_read: usage.cacheRead,
+                cache_fill: usage.cacheFill,
+              }
+            : undefined,
+        )
+      } catch {
+        /* non-fatal */
+      }
     }
 
     // Matrix notification on ACTION_REQUIRED or completion
@@ -268,7 +418,9 @@ export async function runAgent(
       const msg = actionRequired
         ? formatActionRequiredMessage(projectLabel, agentLabel, actionRequired, sessionId)
         : formatAgentRunMessage(projectLabel, agentLabel, resultado, sessionId)
-      sendMatrixMessage(matrixCfg, msg).catch(() => { /* non-fatal */ })
+      sendMatrixMessage(matrixCfg, msg).catch(() => {
+        /* non-fatal */
+      })
     }
 
     return {
@@ -283,7 +435,13 @@ export async function runAgent(
   } catch (e) {
     markInactive(projectLabel)
     const durationMs = Date.now() - start
-    log({ event: 'agent_run', project: projectLabel, agent: agentLabel, status: 'failed', duration_s: Math.round(durationMs / 100) / 10 })
+    log({
+      event: 'agent_run',
+      project: projectLabel,
+      agent: agentLabel,
+      status: 'failed',
+      duration_s: Math.round(durationMs / 100) / 10,
+    })
     return {
       success: false,
       output: '',

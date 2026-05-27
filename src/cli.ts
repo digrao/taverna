@@ -2,11 +2,19 @@
 import { Command } from 'commander'
 import { join, isAbsolute, resolve } from 'node:path'
 import { readdir } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import type { Dirent } from 'node:fs'
 import { morning } from './morning/index.js'
 import { defineConfig } from './config.js'
 import { storeAssets, pullAssets, statusAssets } from './assets/index.js'
-import { scanVault, appendLogbook, appendProjectLogbook, updateProjectStatus, readProject } from './vault/index.js'
+import { syncAssets, listUnprocessed } from './edisciplinas/registry.js'
+import {
+  scanVault,
+  appendLogbook,
+  appendProjectLogbook,
+  updateProjectStatus,
+  readProject,
+} from './vault/index.js'
 import { runAgent, runPipeline } from './pm/executor.js'
 import { snapshot, computeHealth } from './pm/loki.js'
 import { emitEvent } from './pm/event-bus.js'
@@ -15,11 +23,16 @@ import { writeActionRequest } from './inbox/action.js'
 import type { ActionUrgency } from './inbox/action.js'
 import { processInbox, MAX_CHARS_PER_RUN } from './inbox/index.js'
 import { migrate } from './migrate/index.js'
-import { fetchEntries, fetchProjects, matchEntries, writeDeepWorkToFrontmatter } from './clockify/index.js'
+import {
+  fetchEntries,
+  fetchProjects,
+  matchEntries,
+  writeDeepWorkToFrontmatter,
+} from './clockify/index.js'
 import type { ClockifyConfig } from './clockify/index.js'
-import { runScheduler } from './pm/scheduler.js'
-import type { TypePolicy } from './pm/scheduler.js'
+import { runScheduler, isProjectDue } from './pm/scheduler.js'
 import { defaultTypePolicies } from './pm/policies.js'
+import { rankProjects } from './pm/scorer.js'
 
 import type { VaultAgent, VaultProject } from './vault/index.js'
 import type { TavernaConfig } from './config.js'
@@ -30,7 +43,9 @@ function getClockifyConfig(): ClockifyConfig {
   const workspaceId = process.env['CLOCKIFY_WORKSPACE_ID']
   const userId = process.env['CLOCKIFY_USER_ID']
   if (!apiKey || !workspaceId || !userId) {
-    console.error('Error: CLOCKIFY_API_KEY, CLOCKIFY_WORKSPACE_ID, and CLOCKIFY_USER_ID are required')
+    console.error(
+      'Error: CLOCKIFY_API_KEY, CLOCKIFY_WORKSPACE_ID, and CLOCKIFY_USER_ID are required',
+    )
     process.exit(1)
   }
   return { apiKey, workspaceId, userId }
@@ -71,17 +86,21 @@ async function runOnce(
     lastStatus: result.success ? 'success' : 'failed',
     runsTotal: project.runsTotal + 1,
   })
-  await appendLogbook(agent.id, {
-    projectName: project.id,
-    content: [
-      `**Success:** ${result.success}`,
-      `**Duration:** ${(result.durationMs / 1000).toFixed(1)}s`,
-      ...(result.resultado ? [`**Resultado:** ${result.resultado}`] : []),
-      ...(result.error ? [`**Error:** ${result.error}`] : []),
-    ].join('\n'),
-    success: result.success,
-    duration: result.durationMs / 1000,
-  }, config)
+  await appendLogbook(
+    agent.id,
+    {
+      projectName: project.id,
+      content: [
+        `**Success:** ${result.success}`,
+        `**Duration:** ${(result.durationMs / 1000).toFixed(1)}s`,
+        ...(result.resultado ? [`**Resultado:** ${result.resultado}`] : []),
+        ...(result.error ? [`**Error:** ${result.error}`] : []),
+      ].join('\n'),
+      success: result.success,
+      duration: result.durationMs / 1000,
+    },
+    config,
+  )
 
   snapshot(project)
 
@@ -103,7 +122,9 @@ async function runOnce(
 
   // Inbox notification when human action is needed (task 03)
   if (!dryRun) {
-    const blockedTasks = project.tasks.filter(t => t.bloqueio || (t.requerHumano && t.requerHumano.length > 0))
+    const blockedTasks = project.tasks.filter(
+      (t) => t.bloqueio || (t.requerHumano && t.requerHumano.length > 0),
+    )
     const snap = computeHealth(project)
 
     if (result.actionRequired) {
@@ -116,10 +137,11 @@ async function runOnce(
         contexto: result.output,
       })
     } else if (blockedTasks.length > 0) {
-      const urgencia: ActionUrgency = snap.health === 'overdue' || blockedTasks.some(t => t.bloqueio) ? 'high' : 'medium'
-      const acoes = blockedTasks.flatMap(t => [
+      const urgencia: ActionUrgency =
+        snap.health === 'overdue' || blockedTasks.some((t) => t.bloqueio) ? 'high' : 'medium'
+      const acoes = blockedTasks.flatMap((t) => [
         ...(t.bloqueio ? [`[${t.id}] Resolver bloqueio: ${t.bloqueioDetalhe ?? t.bloqueio}`] : []),
-        ...(t.requerHumano ?? []).map(a => `[${t.id}] ${a}`),
+        ...(t.requerHumano ?? []).map((a) => `[${t.id}] ${a}`),
       ])
       await writeActionRequest(config.vaultPath, {
         projeto: project.id,
@@ -147,7 +169,7 @@ async function drainProject(
 ): Promise<void> {
   let current = project
   for (let i = 0; i < maxTasks; i++) {
-    const pending = current.tasks.filter(t => t.progresso < 100)
+    const pending = current.tasks.filter((t) => t.progresso < 100)
     if (pending.length === 0) {
       console.log(`  no pending tasks remaining`)
       break
@@ -192,7 +214,11 @@ async function findProjectAssetsDirs(projectDir: string): Promise<string[]> {
   const recurse = async (dir: string, depth: number): Promise<void> => {
     if (depth > 6) return
     let entries: Dirent[]
-    try { entries = await readdir(dir, { withFileTypes: true }) } catch { return }
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
     for (const e of entries) {
       if (!e.isDirectory() || e.name.startsWith('.')) continue
       const full = join(dir, e.name)
@@ -218,36 +244,51 @@ assetsCmd
   .option('--gdrive', 'Also upload to Google Drive via rclone')
   .option('--dry-run', 'Show what would be stored without uploading')
   .option('--project', 'Treat <target> as project ID; auto-discovers assets/ subdirs')
-  .action(async (target: string, opts: { vault?: string; copyparty?: string; gdrive?: boolean; dryRun?: boolean; project?: boolean }) => {
-    const vaultPath = getVaultPath(opts)
-    const config = defineConfig({
-      vaultPath,
-      ...(opts.copyparty ? { copypartyUrl: opts.copyparty } : {}),
-    })
-
-    const dirs = opts.project
-      ? await findProjectAssetsDirs(join(vaultPath, config.projectsDir, target))
-      : [resolveAssetPath(target, vaultPath)]
-
-    let totalStored = 0, totalSkipped = 0, totalErrors = 0
-    for (const dir of dirs) {
-      if (dirs.length > 1) console.log(`\n→ ${dir.replace(vaultPath + '/', '')}`)
-      const result = await storeAssets(dir, {
+  .action(
+    async (
+      target: string,
+      opts: {
+        vault?: string
+        copyparty?: string
+        gdrive?: boolean
+        dryRun?: boolean
+        project?: boolean
+      },
+    ) => {
+      const vaultPath = getVaultPath(opts)
+      const config = defineConfig({
         vaultPath,
-        extensions: config.assetExtensions,
-        ...(config.copypartyUrl ? { copypartyUrl: config.copypartyUrl } : {}),
-        ...(opts.gdrive ? { gdriveRemote: config.gdriveRemote, gdriveBasePath: config.gdriveBasePath } : {}),
-        ...(opts.dryRun ? { dryRun: true as const } : {}),
+        ...(opts.copyparty ? { copypartyUrl: opts.copyparty } : {}),
       })
-      for (const f of result.stored) console.log(`  stored  ${f.replace(vaultPath + '/', '')}`)
-      for (const f of result.skipped) console.log(`  skip    ${f.replace(vaultPath + '/', '')}`)
-      for (const e of result.errors) console.error(`  error   ${e.file}: ${e.error}`)
-      totalStored += result.stored.length
-      totalSkipped += result.skipped.length
-      totalErrors += result.errors.length
-    }
-    console.log(`\n${totalStored} stored, ${totalSkipped} skipped, ${totalErrors} errors`)
-  })
+
+      const dirs = opts.project
+        ? await findProjectAssetsDirs(join(vaultPath, config.projectsDir, target))
+        : [resolveAssetPath(target, vaultPath)]
+
+      let totalStored = 0,
+        totalSkipped = 0,
+        totalErrors = 0
+      for (const dir of dirs) {
+        if (dirs.length > 1) console.log(`\n→ ${dir.replace(vaultPath + '/', '')}`)
+        const result = await storeAssets(dir, {
+          vaultPath,
+          extensions: config.assetExtensions,
+          ...(config.copypartyUrl ? { copypartyUrl: config.copypartyUrl } : {}),
+          ...(opts.gdrive
+            ? { gdriveRemote: config.gdriveRemote, gdriveBasePath: config.gdriveBasePath }
+            : {}),
+          ...(opts.dryRun ? { dryRun: true as const } : {}),
+        })
+        for (const f of result.stored) console.log(`  stored  ${f.replace(vaultPath + '/', '')}`)
+        for (const f of result.skipped) console.log(`  skip    ${f.replace(vaultPath + '/', '')}`)
+        for (const e of result.errors) console.error(`  error   ${e.file}: ${e.error}`)
+        totalStored += result.stored.length
+        totalSkipped += result.skipped.length
+        totalErrors += result.errors.length
+      }
+      console.log(`\n${totalStored} stored, ${totalSkipped} skipped, ${totalErrors} errors`)
+    },
+  )
 
 assetsCmd
   .command('pull <target>')
@@ -263,7 +304,9 @@ assetsCmd
       ? await findProjectAssetsDirs(join(vaultPath, config.projectsDir, target))
       : [resolveAssetPath(target, vaultPath)]
 
-    let totalDownloaded = 0, totalSkipped = 0, totalErrors = 0
+    let totalDownloaded = 0,
+      totalSkipped = 0,
+      totalErrors = 0
     for (const dir of dirs) {
       if (dirs.length > 1) console.log(`\n→ ${dir.replace(vaultPath + '/', '')}`)
       const result = await pullAssets(dir, { ...(opts.dryRun ? { dryRun: true as const } : {}) })
@@ -274,7 +317,9 @@ assetsCmd
       totalSkipped += result.skipped.length
       totalErrors += result.errors.length
     }
-    console.log(`\n${totalDownloaded} downloaded, ${totalSkipped} up-to-date, ${totalErrors} errors`)
+    console.log(
+      `\n${totalDownloaded} downloaded, ${totalSkipped} up-to-date, ${totalErrors} errors`,
+    )
   })
 
 assetsCmd
@@ -290,7 +335,12 @@ assetsCmd
       ? await findProjectAssetsDirs(join(vaultPath, config.projectsDir, target))
       : [resolveAssetPath(target, vaultPath)]
 
-    const icons: Record<string, string> = { ok: 'ok      ', missing: 'missing ', modified: 'modified', 'no-pointer': 'unstored' }
+    const icons: Record<string, string> = {
+      ok: 'ok      ',
+      missing: 'missing ',
+      modified: 'modified',
+      'no-pointer': 'unstored',
+    }
     let total = 0
     for (const dir of dirs) {
       if (dirs.length > 1) console.log(`\n→ ${dir.replace(vaultPath + '/', '')}`)
@@ -304,11 +354,59 @@ assetsCmd
     if (total === 0) console.log('No assets found.')
   })
 
+// ── edisciplinas ──────────────────────────────────────────────────────────────
+
+const edisciplinasCmd = program
+  .command('edisciplinas')
+  .description('Manage e-Disciplinas downloaded materials registry')
+
+edisciplinasCmd
+  .command('sync <id>')
+  .description('Sync _edisciplinas_metadata.json with .edisciplinas.json registry')
+  .option('--downloads <path>', 'Downloads directory', homedir() + '/Downloads')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .action(async (id: string, opts: { downloads?: string; vault?: string }) => {
+    const vaultPath = getVaultPath(opts)
+    const downloads = opts.downloads ?? homedir() + '/Downloads'
+    console.log(`🔄 Syncing ${id}...`)
+    const stats = await syncAssets(id, vaultPath, downloads)
+    if (stats.message) {
+      console.log(`⚠️  ${stats.message}`)
+    } else {
+      console.log(
+        `✅ ${stats.new} new  •  ${stats.updated} updated  •  ${stats.missing} missing  (${stats.total} total)`,
+      )
+    }
+  })
+
+edisciplinasCmd
+  .command('unprocessed <id>')
+  .description('List unprocessed materials by priority')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .action(async (id: string, opts: { vault?: string }) => {
+    const vaultPath = getVaultPath(opts)
+    const items = await listUnprocessed(id, vaultPath)
+    console.log(`\n📚 Unprocessed — ${id} (${items.length} items)`)
+    if (items.length === 0) return
+    let lastPriority = ''
+    for (const item of items) {
+      if (item.priority !== lastPriority) {
+        console.log(`\n${item.priority}`)
+        lastPriority = item.priority
+      }
+      const daysAgo = Math.floor((Date.now() - new Date(item.last_seen).getTime()) / 86_400_000)
+      console.log(`  ${item.section} / ${item.filename}  [${daysAgo}d ago]`)
+    }
+    console.log()
+  })
+
 // ── run ───────────────────────────────────────────────────────────────────────
 
 program
   .command('run [agent]')
-  .description('Run an agent on a project. Agent is auto-detected from project frontmatter or tipo if omitted.')
+  .description(
+    'Run an agent on a project. Agent is auto-detected from project frontmatter or tipo if omitted.',
+  )
   .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
   .option('--project <id>', 'Project ID (required when agent is omitted)')
   .option('--dry-run', 'Print the prompt without executing')
@@ -317,97 +415,128 @@ program
   .option('--drain', 'Run tasks sequentially until done or --max-tasks is reached')
   .option('--max-tasks <n>', 'Max tasks per drain session (default: 3)', '3')
   .option('--pipeline', 'Run agents listed in project.pipeline frontmatter in sequence')
-  .action(async (agentId: string | undefined, opts: { vault?: string; project?: string; dryRun?: boolean; maxChars?: string; timeout?: string; drain?: boolean; maxTasks?: string; pipeline?: boolean }) => {
-    const vaultPath = getVaultPath(opts)
-    const config = defineConfig({ vaultPath })
-    const vault = await scanVault(config)
+  .action(
+    async (
+      agentId: string | undefined,
+      opts: {
+        vault?: string
+        project?: string
+        dryRun?: boolean
+        maxChars?: string
+        timeout?: string
+        drain?: boolean
+        maxTasks?: string
+        pipeline?: boolean
+      },
+    ) => {
+      const vaultPath = getVaultPath(opts)
+      const config = defineConfig({ vaultPath })
+      const vault = await scanVault(config)
 
-    const projects = opts.project
-      ? vault.projects.filter(p => p.id === opts.project || p.name === opts.project)
-      : agentId
-        ? vault.projects.filter(p => {
-            const name = agentId.startsWith('@') ? agentId : `@${agentId}`
-            return p.agent === name
+      const projects = opts.project
+        ? vault.projects.filter((p) => p.id === opts.project || p.name === opts.project)
+        : agentId
+          ? vault.projects.filter((p) => {
+              const name = agentId.startsWith('@') ? agentId : `@${agentId}`
+              return p.agent === name
+            })
+          : []
+
+      if (projects.length === 0) {
+        const hint = opts.project ? `project "${opts.project}"` : `agent "${agentId}"`
+        console.error(`No projects found for ${hint}`)
+        process.exit(1)
+      }
+
+      const runOpts: ExecutorOptions = {
+        ...(opts.maxChars ? { maxContextChars: Number(opts.maxChars) } : {}),
+        ...(opts.timeout ? { timeoutMs: Number(opts.timeout) } : {}),
+        vaultPath: config.vaultPath,
+      }
+      const maxTasks = opts.drain ? Number(opts.maxTasks ?? 3) : 1
+
+      for (const project of projects) {
+        if (opts.pipeline) {
+          const pipelineIds = project.pipeline
+          if (!pipelineIds || pipelineIds.length === 0) {
+            console.error(`  skip ${project.id}: no pipeline declared in frontmatter`)
+            continue
+          }
+
+          const agents: VaultAgent[] = []
+          for (const id of pipelineIds) {
+            const agent = vault.agents.find(
+              (a) => a.id === id || a.folderName === id || `@${a.folderName}` === id,
+            )
+            if (!agent) {
+              console.error(`  abort ${project.id}: pipeline agent ${id} not found`)
+              break
+            }
+            agents.push(agent)
+          }
+          if (agents.length !== pipelineIds.length) continue
+
+          console.log(`\nPipeline on ${project.id}: ${agents.map((a) => a.id).join(' → ')}`)
+          const results = await runPipeline(agents, project, {
+            ...runOpts,
+            dryRun: opts.dryRun ?? false,
           })
-        : []
 
-    if (projects.length === 0) {
-      const hint = opts.project ? `project "${opts.project}"` : `agent "${agentId}"`
-      console.error(`No projects found for ${hint}`)
-      process.exit(1)
-    }
+          for (let i = 0; i < results.length; i++) {
+            const r = results[i]!
+            const label = agents[i]!.id
+            if (opts.dryRun) {
+              console.log(`\n── ${label} prompt ──\n`)
+              console.log(r.output)
+            } else {
+              console.log(
+                `  ${label}: ${r.success ? `done (${r.durationMs}ms)` : `failed: ${r.error}`}`,
+              )
+              if (r.resultado) console.log(`  RESULTADO: ${r.resultado}`)
+            }
+          }
 
-    const runOpts: ExecutorOptions = {
-      ...(opts.maxChars ? { maxContextChars: Number(opts.maxChars) } : {}),
-      ...(opts.timeout ? { timeoutMs: Number(opts.timeout) } : {}),
-      vaultPath: config.vaultPath,
-    }
-    const maxTasks = opts.drain ? Number(opts.maxTasks ?? 3) : 1
-
-    for (const project of projects) {
-      if (opts.pipeline) {
-        const pipelineIds = project.pipeline
-        if (!pipelineIds || pipelineIds.length === 0) {
-          console.error(`  skip ${project.id}: no pipeline declared in frontmatter`)
+          const allSucceeded = results.every((r) => r.success)
+          if (allSucceeded && !opts.dryRun) {
+            await updateProjectStatus(project.filePath, {
+              lastRun: new Date().toISOString(),
+              lastStatus: 'success',
+              runsTotal: project.runsTotal + 1,
+            })
+          }
           continue
         }
 
-        const agents: VaultAgent[] = []
-        for (const id of pipelineIds) {
-          const agent = vault.agents.find(a => a.id === id || a.folderName === id || `@${a.folderName}` === id)
-          if (!agent) {
-            console.error(`  abort ${project.id}: pipeline agent ${id} not found`)
-            break
-          }
-          agents.push(agent)
-        }
-        if (agents.length !== pipelineIds.length) continue
+        const resolvedAgentName = agentId
+          ? agentId.startsWith('@')
+            ? agentId
+            : `@${agentId}`
+          : (project.agent ?? config.agentDefaults[project.tipo])
 
-        console.log(`\nPipeline on ${project.id}: ${agents.map(a => a.id).join(' → ')}`)
-        const results = await runPipeline(agents, project, { ...runOpts, dryRun: opts.dryRun ?? false })
-
-        for (let i = 0; i < results.length; i++) {
-          const r = results[i]!
-          const label = agents[i]!.id
-          if (opts.dryRun) {
-            console.log(`\n── ${label} prompt ──\n`)
-            console.log(r.output)
-          } else {
-            console.log(`  ${label}: ${r.success ? `done (${r.durationMs}ms)` : `failed: ${r.error}`}`)
-            if (r.resultado) console.log(`  RESULTADO: ${r.resultado}`)
-          }
+        if (!resolvedAgentName) {
+          console.error(
+            `  skip ${project.id}: no agent declared and no default for tipo "${project.tipo}"`,
+          )
+          continue
         }
 
-        const allSucceeded = results.every(r => r.success)
-        if (allSucceeded && !opts.dryRun) {
-          await updateProjectStatus(project.filePath, {
-            lastRun: new Date().toISOString(),
-            lastStatus: 'success',
-            runsTotal: project.runsTotal + 1,
-          })
+        const agent = vault.agents.find(
+          (a) => a.id === resolvedAgentName || a.folderName === resolvedAgentName,
+        )
+        if (!agent) {
+          console.error(
+            `  skip ${project.id}: agent ${resolvedAgentName} not found (available: ${vault.agents.map((a) => a.id).join(', ')})`,
+          )
+          continue
         }
-        continue
+
+        console.log(
+          `\nRunning ${agent.id} on ${project.id}${maxTasks > 1 ? ` (drain ≤${maxTasks} tasks)` : ''}…`,
+        )
+        await drainProject(agent, project, maxTasks, runOpts, config, opts.dryRun ?? false)
       }
-
-      const resolvedAgentName = agentId
-        ? (agentId.startsWith('@') ? agentId : `@${agentId}`)
-        : project.agent ?? config.agentDefaults[project.tipo]
-
-      if (!resolvedAgentName) {
-        console.error(`  skip ${project.id}: no agent declared and no default for tipo "${project.tipo}"`)
-        continue
-      }
-
-      const agent = vault.agents.find(a => a.id === resolvedAgentName || a.folderName === resolvedAgentName)
-      if (!agent) {
-        console.error(`  skip ${project.id}: agent ${resolvedAgentName} not found (available: ${vault.agents.map(a => a.id).join(', ')})`)
-        continue
-      }
-
-      console.log(`\nRunning ${agent.id} on ${project.id}${maxTasks > 1 ? ` (drain ≤${maxTasks} tasks)` : ''}…`)
-      await drainProject(agent, project, maxTasks, runOpts, config, opts.dryRun ?? false)
-    }
-  })
+    },
+  )
 
 // ── execute ───────────────────────────────────────────────────────────────────
 
@@ -418,44 +547,107 @@ program
   .option('--dry-run', 'Print prompts without executing')
   .option('--drain', 'Run tasks sequentially per project until done or --max-tasks is reached')
   .option('--max-tasks <n>', 'Max tasks per project per drain session (default: 3)', '3')
-  .action(async (opts: { vault?: string; dryRun?: boolean; drain?: boolean; maxTasks?: string }) => {
+  .action(
+    async (opts: { vault?: string; dryRun?: boolean; drain?: boolean; maxTasks?: string }) => {
+      const vaultPath = getVaultPath(opts)
+      const config = defineConfig({ vaultPath })
+      const vault = await scanVault(config)
+
+      const now = Date.now()
+      const freqMs: Record<string, number> = {
+        hourly: 3_600_000,
+        daily: 86_400_000,
+        weekly: 604_800_000,
+        monthly: 2_592_000_000,
+      }
+
+      const eligible = vault.projects.filter((p) => {
+        if (!p.agent || p.runEvery === 'never') return false
+        if (!p.lastRun) return true
+        const freq = freqMs[p.runEvery]
+        if (!freq) return false
+        return now - new Date(p.lastRun).getTime() >= freq
+      })
+
+      if (eligible.length === 0) {
+        console.log('No eligible projects.')
+        return
+      }
+
+      const maxTasks = opts.drain ? Number(opts.maxTasks ?? 3) : 1
+
+      for (const project of eligible) {
+        const resolvedAgentName = project.agent ?? config.agentDefaults[project.tipo]
+        const agent = vault.agents.find(
+          (a) => a.id === resolvedAgentName || a.folderName === resolvedAgentName,
+        )
+        if (!agent) {
+          console.error(`  skip ${project.id}: agent ${resolvedAgentName} not found`)
+          continue
+        }
+        console.log(
+          `\n${project.id} → ${agent.id}${maxTasks > 1 ? ` (drain ≤${maxTasks} tasks)` : ''}`,
+        )
+        await drainProject(agent, project, maxTasks, {}, config, opts.dryRun ?? false)
+      }
+    },
+  )
+
+// ── schedule-preview ──────────────────────────────────────────────────────────
+
+program
+  .command('schedule-preview')
+  .description('Show project run priority ranking without executing')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .option('--limit <n>', 'Max projects to show (default: all)', '20')
+  .action(async (opts: { vault?: string; limit?: string }) => {
     const vaultPath = getVaultPath(opts)
     const config = defineConfig({ vaultPath })
     const vault = await scanVault(config)
+    const now = new Date()
 
-    const now = Date.now()
-    const freqMs: Record<string, number> = {
-      hourly: 3_600_000,
-      daily: 86_400_000,
-      weekly: 604_800_000,
-      monthly: 2_592_000_000,
-    }
+    const due = vault.projects.filter((p) => isProjectDue(p, now))
+    const notDue = vault.projects.filter((p) => !isProjectDue(p, now) && p.runEvery !== 'never')
 
-    const eligible = vault.projects.filter(p => {
-      if (!p.agent || p.runEvery === 'never') return false
-      if (!p.lastRun) return true
-      const freq = freqMs[p.runEvery]
-      if (!freq) return false
-      return now - new Date(p.lastRun).getTime() >= freq
-    })
+    const ranked = rankProjects(due, config.agentDefaults, { now })
+    const limit = Number(opts.limit ?? 20)
 
-    if (eligible.length === 0) {
-      console.log('No eligible projects.')
-      return
-    }
+    console.log(`\nSCHEDULE PREVIEW — ${now.toLocaleString()}\n`)
 
-    const maxTasks = opts.drain ? Number(opts.maxTasks ?? 3) : 1
-
-    for (const project of eligible) {
-      const resolvedAgentName = project.agent ?? config.agentDefaults[project.tipo]
-      const agent = vault.agents.find(a => a.id === resolvedAgentName || a.folderName === resolvedAgentName)
-      if (!agent) {
-        console.error(`  skip ${project.id}: agent ${resolvedAgentName} not found`)
-        continue
+    if (ranked.length === 0) {
+      console.log('  No projects due.')
+    } else {
+      console.log('ELIGIBLE (sorted by priority score):')
+      for (const { project, score, factors, agentId } of ranked.slice(0, limit)) {
+        const health = computeHealth(project)
+        const factorStr = factors
+          .map((f) => `${f.name}:${f.points > 0 ? '+' : ''}${f.points}`)
+          .join(' ')
+        const deadlineStr =
+          health.deadline_days !== undefined ? ` | deadline: ${health.deadline_days}d` : ''
+        console.log(
+          `  ${String(score).padStart(3)} pts  ${project.id.padEnd(24)} → ${agentId.padEnd(20)}  [${health.health}${deadlineStr}]  (${factorStr})`,
+        )
       }
-      console.log(`\n${project.id} → ${agent.id}${maxTasks > 1 ? ` (drain ≤${maxTasks} tasks)` : ''}`)
-      await drainProject(agent, project, maxTasks, {}, config, opts.dryRun ?? false)
     }
+
+    if (notDue.length > 0) {
+      console.log(`\nNOT DUE YET (${notDue.length} projects):`)
+      for (const p of notDue.slice(0, 5)) {
+        const freqMap: Record<string, number> = {
+          hourly: 3_600_000,
+          daily: 86_400_000,
+          weekly: 604_800_000,
+          monthly: 2_592_000_000,
+        }
+        const nextMs = p.lastRun ? new Date(p.lastRun).getTime() + (freqMap[p.runEvery] ?? 0) : 0
+        const inMin = Math.max(0, Math.round((nextMs - now.getTime()) / 60_000))
+        console.log(`  ${p.id.padEnd(24)} (${p.runEvery}, next in ${inMin}m)`)
+      }
+      if (notDue.length > 5) console.log(`  … and ${notDue.length - 5} more`)
+    }
+
+    console.log()
   })
 
 // ── inbox ─────────────────────────────────────────────────────────────────────
@@ -482,7 +674,8 @@ program
     }
     if (!opts.dryRun) {
       console.log(`  processed: ${result.processed}`)
-      if (result.skipped > 0) console.log(`  deferred:  ${result.skipped} (over char limit, next run)`)
+      if (result.skipped > 0)
+        console.log(`  deferred:  ${result.skipped} (over char limit, next run)`)
       for (const e of result.errors) console.error(`  error   ${e.file}: ${e.error}`)
     }
   })
@@ -496,38 +689,43 @@ program
   .option('--id <id>', 'Override the project ID (default: folder name)')
   .option('--no-tasks', 'Skip task extraction — create only the project file')
   .option('--dry-run', 'Print the Claude prompt without running or writing anything')
-  .action(async (archivePath: string, opts: { vault?: string; id?: string; tasks?: boolean; dryRun?: boolean }) => {
-    const vaultPath = getVaultPath(opts)
-    const config = defineConfig({ vaultPath })
-    const projectsDir = join(vaultPath, config.projectsDir)
+  .action(
+    async (
+      archivePath: string,
+      opts: { vault?: string; id?: string; tasks?: boolean; dryRun?: boolean },
+    ) => {
+      const vaultPath = getVaultPath(opts)
+      const config = defineConfig({ vaultPath })
+      const projectsDir = join(vaultPath, config.projectsDir)
 
-    // Resolve archive path: absolute or relative to vault
-    const resolvedArchive = archivePath.startsWith('/')
-      ? archivePath
-      : join(vaultPath, archivePath)
+      // Resolve archive path: absolute or relative to vault
+      const resolvedArchive = archivePath.startsWith('/')
+        ? archivePath
+        : join(vaultPath, archivePath)
 
-    console.log(`Scanning: ${resolvedArchive}`)
+      console.log(`Scanning: ${resolvedArchive}`)
 
-    const { result, prompt } = await migrate(resolvedArchive, projectsDir, {
-      dryRun: opts.dryRun ?? false,
-      ...(opts.tasks === false ? { noTasks: true } : {}),
-      ...(opts.id !== undefined ? { overrideId: opts.id } : {}),
-    })
+      const { result, prompt } = await migrate(resolvedArchive, projectsDir, {
+        dryRun: opts.dryRun ?? false,
+        ...(opts.tasks === false ? { noTasks: true } : {}),
+        ...(opts.id !== undefined ? { overrideId: opts.id } : {}),
+      })
 
-    if (opts.dryRun) {
-      console.log('\n── Claude prompt that would be sent ──\n')
-      console.log(prompt)
-      console.log('\n── Would create ──')
-      console.log(`  project  ${result.projectPath}`)
-      return
-    }
+      if (opts.dryRun) {
+        console.log('\n── Claude prompt that would be sent ──\n')
+        console.log(prompt)
+        console.log('\n── Would create ──')
+        console.log(`  project  ${result.projectPath}`)
+        return
+      }
 
-    console.log(`  created  ${result.projectPath}`)
-    for (const t of result.tasksCreated) {
-      console.log(`  task     ${t.replace(vaultPath + '/', '')}`)
-    }
-    console.log(`\nDone. ${result.tasksCreated.length} task(s) created.`)
-  })
+      console.log(`  created  ${result.projectPath}`)
+      for (const t of result.tasksCreated) {
+        console.log(`  task     ${t.replace(vaultPath + '/', '')}`)
+      }
+      console.log(`\nDone. ${result.tasksCreated.length} task(s) created.`)
+    },
+  )
 
 // ── clockify ──────────────────────────────────────────────────────────────────
 
@@ -561,10 +759,12 @@ clockifyCmd
     let updated = 0
 
     for (const stat of stats) {
-      const project = vault.projects.find(p => p.id === stat.projectId)
+      const project = vault.projects.find((p) => p.id === stat.projectId)
       if (!project) continue
       if (opts.dryRun) {
-        console.log(`  ${stat.projectId}: ${stat.totalHours}h total, ${stat.weekHours}h week, last: ${stat.lastEntry}`)
+        console.log(
+          `  ${stat.projectId}: ${stat.totalHours}h total, ${stat.weekHours}h week, last: ${stat.lastEntry}`,
+        )
         continue
       }
       await writeDeepWorkToFrontmatter(project.filePath, stat)
@@ -619,10 +819,17 @@ program
     const { resolvePolicy } = await import('./pm/policy-resolver.js')
 
     const FREQ_LABEL: Record<string, string> = {
-      hourly: '1h', daily: '24h', weekly: '7d', monthly: '30d', never: 'never',
+      hourly: '1h',
+      daily: '24h',
+      weekly: '7d',
+      monthly: '30d',
+      never: 'never',
     }
     const FREQ_MS: Record<string, number> = {
-      hourly: 3_600_000, daily: 86_400_000, weekly: 604_800_000, monthly: 2_592_000_000,
+      hourly: 3_600_000,
+      daily: 86_400_000,
+      weekly: 604_800_000,
+      monthly: 2_592_000_000,
     }
 
     function fmtNextRun(project: import('./vault/types.js').VaultProject): string {
@@ -645,9 +852,9 @@ program
     const typePolicies = defaultTypePolicies(config)
 
     const projects = projectId
-      ? vault.projects.filter(p => p.id === projectId || p.name === projectId)
+      ? vault.projects.filter((p) => p.id === projectId || p.name === projectId)
       : opts.tipo
-        ? vault.projects.filter(p => p.tipo === opts.tipo)
+        ? vault.projects.filter((p) => p.tipo === opts.tipo)
         : vault.projects
 
     if (projects.length === 0) {
@@ -667,7 +874,9 @@ program
       const hasOverride = projectPolicy !== undefined
 
       console.log(`\n${hr}`)
-      console.log(`${project.id}  ·  tipo: ${project.tipo}  ·  priority: ${project.priority}  ·  runEvery: ${project.runEvery} (${FREQ_LABEL[project.runEvery] ?? '?'})`)
+      console.log(
+        `${project.id}  ·  tipo: ${project.tipo}  ·  priority: ${project.priority}  ·  runEvery: ${project.runEvery} (${FREQ_LABEL[project.runEvery] ?? '?'})`,
+      )
       console.log(hr)
 
       console.log(`\nType policy (${project.tipo}):`)
@@ -680,7 +889,9 @@ program
         })
       }
 
-      console.log(`\nProject overrides:  ${hasOverride ? `compose=${projectPolicy!.compose}` : 'none'}`)
+      console.log(
+        `\nProject overrides:  ${hasOverride ? `compose=${projectPolicy!.compose}` : 'none'}`,
+      )
       if (hasOverride && projectPolicy!.steps.length > 0) {
         projectPolicy!.steps.forEach((s, i) => {
           const at = s.at ? `  at ${s.at}` : '  (any time)'
@@ -699,22 +910,33 @@ program
       }
 
       console.log(`\nSchedule:`)
-      console.log(`  Last run:    ${project.lastRun ? new Date(project.lastRun).toLocaleString('pt-BR') : 'never'} (${project.lastStatus ?? '—'})`)
+      console.log(
+        `  Last run:    ${project.lastRun ? new Date(project.lastRun).toLocaleString('pt-BR') : 'never'} (${project.lastStatus ?? '—'})`,
+      )
       console.log(`  Runs total:  ${project.runsTotal}`)
       console.log(`  Next run:    ${fmtNextRun(project)}`)
 
       console.log(`\nHealth:`)
-      console.log(`  Tasks:       ${snap.tasks_done}/${snap.tasks_total} done  (progresso: ${snap.progresso}%)`)
+      console.log(
+        `  Tasks:       ${snap.tasks_done}/${snap.tasks_total} done  (progresso: ${snap.progresso}%)`,
+      )
       if (snap.deadline_days !== undefined) {
-        const dLabel = snap.deadline_days < 0
-          ? `${Math.abs(snap.deadline_days)}d atrás`
-          : snap.deadline_days === 0 ? 'hoje' : `${snap.deadline_days}d`
+        const dLabel =
+          snap.deadline_days < 0
+            ? `${Math.abs(snap.deadline_days)}d atrás`
+            : snap.deadline_days === 0
+              ? 'hoje'
+              : `${snap.deadline_days}d`
         console.log(`  Deadline:    ${dLabel}`)
       }
       console.log(`  Status:      ${snap.health}`)
 
-      const agentId = project.agent ?? (effectiveSteps[0]?.agent)
-      const agent = agentId ? vault.agents.find(a => a.id === agentId || `@${a.folderName}` === agentId || a.folderName === agentId) : undefined
+      const agentId = project.agent ?? effectiveSteps[0]?.agent
+      const agent = agentId
+        ? vault.agents.find(
+            (a) => a.id === agentId || `@${a.folderName}` === agentId || a.folderName === agentId,
+          )
+        : undefined
       if (agent) {
         const perm = resolvePolicy(agent, project)
         console.log(`\nPermissions:  (agent: ${agent.id}  mode: ${perm.permissionMode})`)
@@ -725,7 +947,9 @@ program
             console.log(`  agent directive:  ${perm.agentTools.join(', ')}`)
           }
           if (perm.inferredTools.length > 0) {
-            console.log(`  inferred (${perm.inferredFrom ?? 'target'}):  ${perm.inferredTools.join(', ')}`)
+            console.log(
+              `  inferred (${perm.inferredFrom ?? 'target'}):  ${perm.inferredTools.join(', ')}`,
+            )
           }
           if (perm.allowedTools && perm.allowedTools.length > 0) {
             console.log(`  effective:        ${perm.allowedTools.join(', ')}`)
@@ -757,7 +981,7 @@ program
     const config = defineConfig({ vaultPath })
     const vault = await scanVault(config)
 
-    const project = vault.projects.find(p => p.id === opts.project || p.name === opts.project)
+    const project = vault.projects.find((p) => p.id === opts.project || p.name === opts.project)
     if (!project) {
       console.error(`Project not found: ${opts.project}`)
       process.exit(1)
@@ -771,17 +995,21 @@ program
 
     for (const task of tasks) {
       const pct = String(task.progresso).padStart(3, ' ')
-      const { blocked, blockedBy } = isBlocked(task, tasks)
+      const { blocked, blockedBy: _blockedBy } = isBlocked(task, tasks)
 
       if (!blocked) {
         console.log(`${task.filePath.replace(vaultPath + '/', '')}  [${pct}%] ✓`)
       } else {
-        const depList = (task.depends ?? []).map(depId => {
-          const dep = resolveDependency(depId, tasks)
-          const ok = dep === undefined || dep.progresso === 100
-          return `${depId} ${ok ? '✓' : '✗'}`
-        }).join(', ')
-        console.log(`${task.filePath.replace(vaultPath + '/', '')}  [${pct}%] BLOCKED por: ${depList}`)
+        const depList = (task.depends ?? [])
+          .map((depId) => {
+            const dep = resolveDependency(depId, tasks)
+            const ok = dep === undefined || dep.progresso === 100
+            return `${depId} ${ok ? '✓' : '✗'}`
+          })
+          .join(', ')
+        console.log(
+          `${task.filePath.replace(vaultPath + '/', '')}  [${pct}%] BLOCKED por: ${depList}`,
+        )
       }
     }
   })
@@ -797,7 +1025,7 @@ program
     const vaultPath = getVaultPath(opts)
     const config = defineConfig({ vaultPath })
     const vault = await scanVault(config)
-    const uspProjects = vault.projects.filter(p => p.tipo === 'USP')
+    const uspProjects = vault.projects.filter((p) => p.tipo === 'USP')
 
     if (uspProjects.length === 0) {
       console.log('No USP projects found.')
@@ -820,7 +1048,9 @@ program
 
 program
   .command('snapshot')
-  .description('Emit project_snapshot events for all projects (health + priority) without running agents')
+  .description(
+    'Emit project_snapshot events for all projects (health + priority) without running agents',
+  )
   .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
   .option('--tipo <tipo>', 'Filter by project type: USP, BB, *')
   .option('--dry-run', 'Print JSON to stdout without journal emission')
@@ -829,9 +1059,7 @@ program
     const config = defineConfig({ vaultPath })
     const vault = await scanVault(config)
 
-    const projects = opts.tipo
-      ? vault.projects.filter(p => p.tipo === opts.tipo)
-      : vault.projects
+    const projects = opts.tipo ? vault.projects.filter((p) => p.tipo === opts.tipo) : vault.projects
 
     for (const project of projects) {
       const payload = (await import('./pm/loki.js')).computeHealth(project)
@@ -839,7 +1067,9 @@ program
         console.log(JSON.stringify(payload, null, 2))
       } else {
         snapshot(project)
-        console.log(`  ${project.id.padEnd(28)} health=${payload.health} progresso=${payload.progresso}%`)
+        console.log(
+          `  ${project.id.padEnd(28)} health=${payload.health} progresso=${payload.progresso}%`,
+        )
       }
     }
   })
@@ -883,14 +1113,18 @@ program
     const config = defineConfig({ vaultPath })
     const { join: pjoin } = await import('node:path')
     const { rename, readFile, writeFile, mkdir } = await import('node:fs/promises')
-    const { existsSync } = await import('node:fs')
+    // existsSync not needed here
     const matter = (await import('gray-matter')).default
 
     const projectsDir = pjoin(vaultPath, config.projectsDir)
     // Support partial match: "07" matches "07-token-usage-logging"
     const { readdir } = await import('node:fs/promises')
-    const entries = await readdir(pjoin(projectsDir, projectId, 'tasks')).catch(() => [] as string[])
-    const match = entries.find(f => f.startsWith(taskId) && f.endsWith('.md') && !f.includes('archive'))
+    const entries = await readdir(pjoin(projectsDir, projectId, 'tasks')).catch(
+      () => [] as string[],
+    )
+    const match = entries.find(
+      (f) => f.startsWith(taskId) && f.endsWith('.md') && !f.includes('archive'),
+    )
 
     if (!match) {
       console.error(`Task not found: ${taskId} in ${projectId}/tasks/`)
@@ -931,23 +1165,37 @@ program
     const today = new Date()
     const dateStr = `${today.getFullYear()}${pad(today.getMonth() + 1)}${pad(today.getDate())}`
 
-    interface RunEntry { agent: string; project: string; success: boolean | undefined; duration: number | undefined; ts: string }
+    interface RunEntry {
+      agent: string
+      project: string
+      success: boolean | undefined
+      duration: number | undefined
+      ts: string
+    }
     const runs: RunEntry[] = []
 
     for (const agent of state.agents) {
       const entries = await (await import('./vault/logbook.js')).readLogbook(agent.id, config)
       for (const e of entries) {
         if (new Date(e.timestamp) >= cutoff) {
-          runs.push({ agent: agent.id, project: e.projectName, success: e.success, duration: e.duration, ts: e.timestamp })
+          runs.push({
+            agent: agent.id,
+            project: e.projectName,
+            success: e.success,
+            duration: e.duration,
+            ts: e.timestamp,
+          })
         }
       }
     }
 
     runs.sort((a, b) => a.ts.localeCompare(b.ts))
 
-    const successes = runs.filter(r => r.success === true).length
-    const failures = runs.filter(r => r.success === false).length
-    const avgDur = runs.filter(r => r.duration).reduce((s, r) => s + (r.duration ?? 0), 0) / (runs.filter(r => r.duration).length || 1)
+    const successes = runs.filter((r) => r.success === true).length
+    const failures = runs.filter((r) => r.success === false).length
+    const avgDur =
+      runs.filter((r) => r.duration).reduce((s, r) => s + (r.duration ?? 0), 0) /
+      (runs.filter((r) => r.duration).length || 1)
 
     const lines = [
       `# Report — ${dateStr} (últimas ${hours}h)`,
@@ -958,7 +1206,7 @@ program
 
     if (failures > 0) {
       lines.push('## Falhas')
-      for (const r of runs.filter(r => r.success === false)) {
+      for (const r of runs.filter((r) => r.success === false)) {
         lines.push(`- ✗ **${r.project}** via ${r.agent} @ ${r.ts.slice(11, 16)}`)
       }
       lines.push('')
@@ -978,8 +1226,13 @@ program
     if (opts.dryRun) {
       process.stdout.write(markdown)
     } else {
-      const outPath = join(vaultPath, config.logbooksDir, '..', '5_Inbox', `${dateStr}-report.md`)
-        .replace(/\/\.\.\//g, '/')
+      const _outPath = join(
+        vaultPath,
+        config.logbooksDir,
+        '..',
+        '5_Inbox',
+        `${dateStr}-report.md`,
+      ).replace(/\/\.\.\//g, '/')
       const resolvedPath = join(vaultPath, '60_Agents', '5_Inbox', `${dateStr}-report.md`)
       await writeFile(resolvedPath, markdown, 'utf8')
       console.log(`  written  60_Agents/5_Inbox/${dateStr}-report.md  (${runs.length} runs)`)
@@ -1022,7 +1275,9 @@ program
     const vault = await scanVault(config)
 
     const PRIO_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 }
-    const sorted = [...vault.projects].sort((a, b) => (PRIO_ORDER[a.priority] ?? 1) - (PRIO_ORDER[b.priority] ?? 1))
+    const sorted = [...vault.projects].sort(
+      (a, b) => (PRIO_ORDER[a.priority] ?? 1) - (PRIO_ORDER[b.priority] ?? 1),
+    )
 
     const now = new Date()
     const dateStr = now.toISOString().split('T')[0]
@@ -1035,14 +1290,23 @@ program
 
     for (const project of sorted) {
       const snap = computeHealth(project)
-      const pending = project.tasks.filter(t => t.progresso < 100)
-      const HEALTH_ICON: Record<string, string> = { ok: '🟢', 'at-risk': '🟡', overdue: '🔴', idle: '⚪' }
+      const pending = project.tasks.filter((t) => t.progresso < 100)
+      const HEALTH_ICON: Record<string, string> = {
+        ok: '🟢',
+        'at-risk': '🟡',
+        overdue: '🔴',
+        idle: '⚪',
+      }
       const icon = HEALTH_ICON[snap.health] ?? '⚪'
-      const prio = project.priority === 'high' ? '[HIGH]' : project.priority === 'medium' ? '[MED]' : '[LOW]'
+      const prio =
+        project.priority === 'high' ? '[HIGH]' : project.priority === 'medium' ? '[MED]' : '[LOW]'
       lines.push(`## ${icon} ${prio} ${project.id} (${project.tipo})`)
 
       if (snap.deadline_days !== undefined) {
-        const dl = snap.deadline_days < 0 ? `${Math.abs(snap.deadline_days)}d atrasado` : `${snap.deadline_days}d`
+        const dl =
+          snap.deadline_days < 0
+            ? `${Math.abs(snap.deadline_days)}d atrasado`
+            : `${snap.deadline_days}d`
         lines.push(`_deadline: ${dl} · progresso: ${snap.progresso}%_`)
       } else if (snap.progresso > 0) {
         lines.push(`_progresso: ${snap.progresso}%_`)
@@ -1090,9 +1354,9 @@ program
 
     emitEvent({
       event: 'vault_snapshot',
-      inbox: inboxEntries.filter(e => e.isFile()).length,
-      zettelkasten: zettelEntries.filter(e => e.isFile()).length,
-      projects: projectEntries.filter(e => e.isDirectory()).length,
+      inbox: inboxEntries.filter((e) => e.isFile()).length,
+      zettelkasten: zettelEntries.filter((e) => e.isFile()).length,
+      projects: projectEntries.filter((e) => e.isDirectory()).length,
     })
   })
 
@@ -1108,6 +1372,146 @@ program
     const vaultPath = getVaultPath(opts)
     const config = defineConfig({ vaultPath })
     createServer(config, { port: Number(opts.port ?? 2948) })
+  })
+
+// ── next ──────────────────────────────────────────────────────────────────────
+
+program
+  .command('next')
+  .description('Show next tasks to execute, ranked by project score')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .option('--all', 'Include projects not yet due (show full task queue)')
+  .option('--limit <n>', 'Max projects to show (default: 10)', '10')
+  .action(async (opts: { vault?: string; all?: boolean; limit?: string }) => {
+    const { isProjectDue, readProjectPolicy, mergePolicy, getTypePolicy, isAtSatisfied } =
+      await import('./pm/scheduler.js')
+    const { rankProjects } = await import('./pm/scorer.js')
+    const { isBlocked } = await import('./vault/task.js')
+    const { computeHealth } = await import('./pm/loki.js')
+    const { isRunWindowOpen } = await import('./pm/run-window.js')
+
+    const limit = Number(opts.limit ?? 10)
+    const vaultPath = getVaultPath(opts)
+    const config = defineConfig({ vaultPath })
+    const vault = await scanVault(config)
+    const typePolicies = defaultTypePolicies(config)
+    const now = new Date()
+
+    type Row = {
+      score: number
+      project: import('./vault/types.js').VaultProject
+      agentId: string
+      nextTask?: import('./vault/types.js').VaultTask
+      reason?: string // why ineligible (only when --all)
+    }
+
+    const rows: Row[] = []
+
+    for (const project of vault.projects) {
+      const agentId = (project.agent ??
+        config.agentDefaults[project.tipo] ??
+        config.agentDefaults['*'] ??
+        '') as string
+
+      if (!opts.all) {
+        // Only show eligible (due + window open + policy step satisfied)
+        if (!isProjectDue(project, now)) continue
+
+        const runWindow =
+          typeof project.raw['run_window'] === 'string'
+            ? project.raw['run_window']
+            : (config.defaultRunWindow ?? 'always')
+        const windowResult = await isRunWindowOpen(runWindow, now, config.idleThresholdMinutes)
+        if (!windowResult.open) continue
+
+        const typeSteps = getTypePolicy(project.tipo, typePolicies)
+        const projectPolicy = readProjectPolicy(project.raw)
+        const steps = mergePolicy(typeSteps, projectPolicy)
+        if (steps.filter((s) => isAtSatisfied(s.at, now)).length === 0) continue
+      }
+
+      const pending = project.tasks.filter((t) => t.progresso < 100)
+      const nextTask = pending.find((t) => {
+        const { blocked } = isBlocked(t, project.tasks)
+        return !blocked && !t.bloqueio && !(t.requerHumano && t.requerHumano.length > 0)
+      })
+
+      const [scored] = rankProjects([project], config.agentDefaults, { now })
+      if (!scored) continue
+
+      rows.push({
+        score: scored.score,
+        project,
+        agentId,
+        ...(nextTask !== undefined ? { nextTask } : {}),
+      })
+    }
+
+    rows.sort((a, b) => b.score - a.score)
+    const visible = rows.slice(0, limit)
+
+    if (visible.length === 0) {
+      console.log('  (no eligible projects with pending tasks)')
+      return
+    }
+
+    const HEALTH_ICON: Record<string, string> = {
+      ok: '🟢',
+      'at-risk': '🟡',
+      overdue: '🔴',
+      idle: '⚪',
+    }
+    const dateStr = now.toISOString().replace('T', ' ').slice(0, 16)
+    console.log(`\nNext runs — ${dateStr}${opts.all ? ' (all)' : ''}\n`)
+
+    const colW = { score: 5, project: 20, agent: 22 }
+    const header = [
+      'Score'.padStart(colW.score),
+      'Project'.padEnd(colW.project),
+      'Agent'.padEnd(colW.agent),
+      'Next task',
+    ].join('  ')
+    console.log(header)
+    console.log('─'.repeat(header.length))
+
+    for (const { score, project, agentId, nextTask } of visible) {
+      const health = computeHealth(project)
+      const icon = HEALTH_ICON[health.health] ?? '⚪'
+      const scoreStr = String(score).padStart(colW.score)
+      const projStr = (icon + ' ' + project.id).padEnd(colW.project + 2) // icon is 2 chars wide
+      const agentStr = agentId.padEnd(colW.agent)
+
+      let taskStr = '(no executable task)'
+      if (nextTask) {
+        const prio = nextTask.prioridade !== 'medium' ? ` [${nextTask.prioridade}]` : ''
+        const pct = nextTask.progresso > 0 ? ` ${nextTask.progresso}%` : ''
+        const title =
+          nextTask.title.length > 48 ? nextTask.title.slice(0, 45) + '…' : nextTask.title
+        taskStr = `${nextTask.id}${prio}${pct}  ${title}`
+      }
+
+      console.log(`${scoreStr}  ${projStr}  ${agentStr}  ${taskStr}`)
+    }
+
+    if (rows.length > limit) {
+      console.log(`\n  … e mais ${rows.length - limit} projeto(s) — use --limit para ver mais`)
+    }
+    console.log()
+  })
+
+// ── mcp ───────────────────────────────────────────────────────────────────────
+
+program
+  .command('mcp')
+  .description('Start MCP server (stdio) — wraps the HTTP API at :2948')
+  .option(
+    '--api-url <url>',
+    'Taverna HTTP API base URL (or TAVERNA_API_URL env var)',
+    'http://localhost:2948',
+  )
+  .action(async (opts: { apiUrl?: string }) => {
+    if (opts.apiUrl) process.env['TAVERNA_API_URL'] = opts.apiUrl
+    await import('./mcp/server.js')
   })
 
 program.parse()

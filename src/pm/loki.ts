@@ -29,6 +29,16 @@ export interface ProjectSnapshotPayload {
   progresso: number
   health: HealthStatus
   deadline_days?: number
+  deepwork_total_h?: number
+  deepwork_week_h?: number
+  [key: string]: unknown
+}
+
+export interface AgentDeferredPayload {
+  event: 'agent_deferred'
+  project: string
+  reason: 'run_window' | 'claude_active'
+  next_eligible_at?: string
   [key: string]: unknown
 }
 
@@ -36,20 +46,25 @@ export function log(payload: AgentRunPayload): void {
   emitEvent(payload)
 }
 
+export function deferred(payload: Omit<AgentDeferredPayload, 'event'>): void {
+  emitEvent({ event: 'agent_deferred', ...payload })
+}
+
 const FREQ_MS: Record<string, number> = {
-  hourly:  3_600_000,
-  daily:   86_400_000,
-  weekly:  604_800_000,
+  hourly: 3_600_000,
+  daily: 86_400_000,
+  weekly: 604_800_000,
   monthly: 2_592_000_000,
 }
 
 export function computeHealth(project: VaultProject): ProjectSnapshotPayload {
-  const pending = project.tasks.filter(t => t.progresso < 100)
+  const pending = project.tasks.filter((t) => t.progresso < 100)
   const tasks_total = project.tasks.length
-  const tasks_done = project.tasks.filter(t => t.progresso === 100).length
-  const progresso = tasks_total === 0
-    ? 0
-    : Math.round(project.tasks.reduce((s, t) => s + t.progresso, 0) / tasks_total)
+  const tasks_done = project.tasks.filter((t) => t.progresso === 100).length
+  const progresso =
+    tasks_total === 0
+      ? 0
+      : Math.round(project.tasks.reduce((s, t) => s + t.progresso, 0) / tasks_total)
 
   // Find nearest deadline among pending tasks
   let deadline_days: number | undefined
@@ -81,6 +96,13 @@ export function computeHealth(project: VaultProject): ProjectSnapshotPayload {
     }
   }
 
+  const deepwork_total_h =
+    typeof project.raw['deepwork_total_h'] === 'number'
+      ? project.raw['deepwork_total_h']
+      : undefined
+  const deepwork_week_h =
+    typeof project.raw['deepwork_week_h'] === 'number' ? project.raw['deepwork_week_h'] : undefined
+
   return {
     event: 'project_snapshot',
     project: project.id,
@@ -92,6 +114,8 @@ export function computeHealth(project: VaultProject): ProjectSnapshotPayload {
     health,
     ...(deadline_days !== undefined ? { deadline_days } : {}),
     ...(next_run_in_s !== undefined ? { next_run_in_s } : {}),
+    ...(deepwork_total_h !== undefined ? { deepwork_total_h } : {}),
+    ...(deepwork_week_h !== undefined ? { deepwork_week_h } : {}),
   }
 }
 

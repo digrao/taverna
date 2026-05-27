@@ -1,15 +1,28 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join, basename, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
-import { parseFrontmatter, getString, getPriority, getRunEvery, getStringArray } from './frontmatter.js'
+import {
+  parseFrontmatter,
+  getString,
+  getPriority,
+  getRunEvery,
+  getStringArray,
+} from './frontmatter.js'
 import { readProjectTasks } from './task.js'
-import type { VaultProject, ProjectType, RawFrontmatter, USPProject, BBProject, MetaProject } from './types.js'
+import type {
+  VaultProject,
+  ProjectType,
+  RawFrontmatter,
+  USPProject,
+  BBProject,
+  MetaProject,
+} from './types.js'
 
 // Add entries here to support new types or legacy aliases
 const TIPO_ALIASES: Record<string, ProjectType> = {
   usp: 'USP',
   bb: 'BB',
-  work: 'BB',   // legacy: type: work
+  work: 'BB', // legacy: type: work
   study: 'USP', // legacy: type: study
   '*': '*',
 }
@@ -28,23 +41,20 @@ export function detectProjectType(
 
   // 2. Structural heuristics
   if (fm['cardId'] != null) return 'BB'
-  if (uspPrefixes.some(p => folderName.startsWith(p))) return 'USP'
+  if (uspPrefixes.some((p) => folderName.startsWith(p))) return 'USP'
 
   // 3. Fallback
   return '*'
 }
 
-export async function readProject(
-  filePath: string,
-  uspPrefixes: string[],
-): Promise<VaultProject> {
+export async function readProject(filePath: string, uspPrefixes: string[]): Promise<VaultProject> {
   const raw = await readFile(filePath, 'utf8')
   const { data, content } = parseFrontmatter(raw)
 
-  const folderPath = existsSync(join(dirname(filePath), 'tasks'))
-    || existsSync(join(dirname(filePath), 'assets'))
-    ? dirname(filePath)
-    : undefined
+  const folderPath =
+    existsSync(join(dirname(filePath), 'tasks')) || existsSync(join(dirname(filePath), 'assets'))
+      ? dirname(filePath)
+      : undefined
 
   // Use folder/file name for type detection (strip leading path)
   const stem = basename(filePath, '.md')
@@ -58,15 +68,17 @@ export async function readProject(
   const pipelineRaw = getStringArray(data, 'pipeline')
   const lastRun = getString(data, '_last_run')
   const lastStatusRaw = getString(data, '_last_status')
-  const lastStatus = lastStatusRaw === 'success' || lastStatusRaw === 'failed' ? lastStatusRaw : undefined
+  const lastStatus =
+    lastStatusRaw === 'success' || lastStatusRaw === 'failed' ? lastStatusRaw : undefined
   const runsTotal = typeof data['_runs_total'] === 'number' ? data['_runs_total'] : 0
 
-  const actualFolderPath = dirname(filePath) !== filePath ? dirname(filePath) : undefined
+  const _actualFolderPath = dirname(filePath) !== filePath ? dirname(filePath) : undefined
   // For loose files, folderPath is undefined (they're directly in projectsDir)
   const resolvedFolderPath = folderPath
 
   const hasTasksFolder = resolvedFolderPath != null && existsSync(join(resolvedFolderPath, 'tasks'))
-  const hasAssetsFolder = resolvedFolderPath != null && existsSync(join(resolvedFolderPath, 'assets'))
+  const hasAssetsFolder =
+    resolvedFolderPath != null && existsSync(join(resolvedFolderPath, 'assets'))
   const tasks = resolvedFolderPath != null ? await readProjectTasks(resolvedFolderPath) : []
 
   const base = {
@@ -95,12 +107,12 @@ export async function readProject(
     const horarios = Array.isArray(horariosRaw)
       ? horariosRaw
           .filter((h): h is Record<string, unknown> => h != null && typeof h === 'object')
-          .map(h => ({
+          .map((h) => ({
             dia: typeof h['dia'] === 'string' ? h['dia'] : '',
             ...(typeof h['hora'] === 'string' ? { hora: h['hora'] } : {}),
             ...(typeof h['local'] === 'string' ? { local: h['local'] } : {}),
           }))
-          .filter(h => h.dia !== '')
+          .filter((h) => h.dia !== '')
       : undefined
     return {
       ...base,

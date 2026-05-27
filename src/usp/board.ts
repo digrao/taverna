@@ -26,7 +26,7 @@ function formatDeadline(days: number | undefined): string {
   return `${days}d`
 }
 
-function formatNextRun(s: number | undefined): string {
+function _formatNextRun(s: number | undefined): string {
   if (s === undefined) return '—'
   if (s <= 0) return 'agora'
   const h = Math.floor(s / 3600)
@@ -36,27 +36,27 @@ function formatNextRun(s: number | undefined): string {
 }
 
 function formatTaskBreakdown(p: VaultProject): { aulas: string; entregas: string } {
-  const aulas = p.tasks.filter(t => t.taskType === 'USP-aula')
-  const entregas = p.tasks.filter(t => t.taskType === 'USP-entrega')
-  const generic = p.tasks.filter(t => t.taskType === undefined)
+  const aulas = p.tasks.filter((t) => t.taskType === 'USP-aula')
+  const entregas = p.tasks.filter((t) => t.taskType === 'USP-entrega')
+  const generic = p.tasks.filter((t) => t.taskType === undefined)
 
   if (aulas.length === 0 && entregas.length === 0) {
     // Legacy tasks without type — show total
-    const done = generic.filter(t => t.progresso === 100).length
+    const done = generic.filter((t) => t.progresso === 100).length
     return { aulas: '—', entregas: `${done}/${generic.length}` }
   }
 
-  const aulasDone = aulas.filter(t => t.pipelineStage === 'done').length
+  const aulasDone = aulas.filter((t) => t.pipelineStage === 'done').length
   const entregasDone = entregas.filter(
-    t => t.pipelineStage === 'submitted' || t.pipelineStage === 'graded',
+    (t) => t.pipelineStage === 'submitted' || t.pipelineStage === 'graded',
   ).length
   // Show blocker indicator: aulas not done that block a pending entrega
   const pendingEntregas = entregas.filter(
-    t => t.pipelineStage !== 'submitted' && t.pipelineStage !== 'graded',
+    (t) => t.pipelineStage !== 'submitted' && t.pipelineStage !== 'graded',
   )
-  const blocked = pendingEntregas.some(e =>
-    (e.depends ?? []).some(depId =>
-      aulas.find(a => a.id === depId && a.pipelineStage !== 'done'),
+  const blocked = pendingEntregas.some((e) =>
+    (e.depends ?? []).some((depId) =>
+      aulas.find((a) => a.id === depId && a.pipelineStage !== 'done'),
     ),
   )
   const blockIndicator = blocked ? ' ⚠' : ''
@@ -69,7 +69,7 @@ function formatTaskBreakdown(p: VaultProject): { aulas: string; entregas: string
 
 export function generateBoardBlock(uspProjects: VaultProject[], generatedAt: Date): string {
   const rows = uspProjects
-    .map(p => ({ p, snap: computeHealth(p) }))
+    .map((p) => ({ p, snap: computeHealth(p) }))
     .sort((a, b) => {
       const order = { overdue: 0, 'at-risk': 1, ok: 2, idle: 3 }
       return (order[a.snap.health] ?? 9) - (order[b.snap.health] ?? 9)
@@ -79,7 +79,12 @@ export function generateBoardBlock(uspProjects: VaultProject[], generatedAt: Dat
       const prio = PRIORITY_ICON[snap.priority] ?? '·'
       const deadline = formatDeadline(snap.deadline_days)
       const lastRun = p.lastRun
-        ? new Date(p.lastRun).toLocaleString('pt-BR', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+        ? new Date(p.lastRun).toLocaleString('pt-BR', {
+            month: 'short',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+          })
         : '—'
       const { aulas, entregas } = formatTaskBreakdown(p)
       return `| ${icon} ${p.id} | ${prio} ${snap.priority} | ${aulas} | ${entregas} | ${deadline} | ${lastRun} |`
@@ -98,7 +103,10 @@ export function generateBoardBlock(uspProjects: VaultProject[], generatedAt: Dat
   ].join('\n')
 }
 
-export async function updateBoardFile(filePath: string, uspProjects: VaultProject[]): Promise<void> {
+export async function updateBoardFile(
+  filePath: string,
+  uspProjects: VaultProject[],
+): Promise<void> {
   const block = generateBoardBlock(uspProjects, new Date())
 
   if (!existsSync(filePath)) {

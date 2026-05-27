@@ -1,7 +1,10 @@
+import { NeoMatrixClient } from 'neo-matrix'
+
 export interface MatrixConfig {
   homeserver: string
   roomId: string
   accessToken: string
+  displayName?: string
 }
 
 export function matrixConfigFromEnv(): MatrixConfig | undefined {
@@ -13,20 +16,26 @@ export function matrixConfigFromEnv(): MatrixConfig | undefined {
 }
 
 export async function sendMatrixMessage(config: MatrixConfig, text: string): Promise<void> {
-  const txnId = Date.now().toString(36) + Math.random().toString(36).slice(2)
-  const url = `${config.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(config.roomId)}/send/m.room.message/${txnId}`
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${config.accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ msgtype: 'm.text', body: text }),
+  const client = new NeoMatrixClient({
+    homeserver: config.homeserver,
+    accessToken: config.accessToken,
+    roomId: config.roomId,
+    ...(config.displayName !== undefined ? { displayName: config.displayName } : {}),
   })
-  if (!res.ok) {
-    const err = await res.text().catch(() => res.statusText)
-    throw new Error(`Matrix PUT ${res.status}: ${err}`)
-  }
+  await client.send(text)
+}
+
+export function formatAgentStartMessage(
+  project: string,
+  agent: string,
+  tmuxSession: string,
+  sessionId: string,
+): string {
+  return [
+    `[taverna] ▶ ${agent} iniciou ${project}`,
+    `tmux: tmux attach -t ${tmuxSession}`,
+    `session: ${sessionId}`,
+  ].join('\n')
 }
 
 export function formatAgentRunMessage(
@@ -46,10 +55,7 @@ export function formatActionRequiredMessage(
   action: string,
   sessionId?: string,
 ): string {
-  const lines = [
-    `[taverna] ⚠ ${agent} aguarda input em ${project}`,
-    action,
-  ]
+  const lines = [`[taverna] ⚠ ${agent} aguarda input em ${project}`, action]
   if (sessionId) lines.push(`Retomar: claude --resume ${sessionId}`)
   return lines.join('\n')
 }

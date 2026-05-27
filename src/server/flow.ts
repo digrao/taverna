@@ -5,61 +5,85 @@ import type { VaultProject } from '../vault/types.js'
 // ---------------------------------------------------------------------------
 
 const STATE_ORDER = [
-  'backlog', 'tarefinha', 'tarefa', 'em-progresso',
-  'aguardando_humano', 'bloqueada', 'concluida',
+  'backlog',
+  'tarefinha',
+  'tarefa',
+  'em-progresso',
+  'aguardando_humano',
+  'bloqueada',
+  'concluida',
 ] as const
 
 const STATE_LABELS: Record<string, string> = {
-  'backlog':            'Backlog',
-  'tarefinha':          'Tarefinha',
-  'tarefa':             'Tarefa',
-  'em-progresso':       'Em Progresso',
-  'aguardando_humano':  'Aguardando Humano',
-  'bloqueada':          'Bloqueada',
-  'concluida':          'Concluída',
+  backlog: 'Backlog',
+  tarefinha: 'Tarefinha',
+  tarefa: 'Tarefa',
+  'em-progresso': 'Em Progresso',
+  aguardando_humano: 'Aguardando Humano',
+  bloqueada: 'Bloqueada',
+  concluida: 'Concluída',
 }
 
 // SVG layout -----------------------------------------------------------------
 
-interface Node { id: string; x: number; y: number; w: number; h: number }
+interface Node {
+  id: string
+  x: number
+  y: number
+  w: number
+  h: number
+}
 // x,y = top-left corner
 
-const W = 110, H = 40, GAP = 20
+const W = 110,
+  H = 40,
+  _GAP = 20
 
 // Row 1 — happy path (y=20)
 const ROW1_Y = 20
 const nodes: Node[] = [
-  { id: 'backlog',           x:   0, y: ROW1_Y, w: W,   h: H },
-  { id: 'tarefinha',         x: 150, y: ROW1_Y, w: W,   h: H },
-  { id: 'tarefa',            x: 300, y: ROW1_Y, w: W,   h: H },
-  { id: 'em-progresso',      x: 450, y: ROW1_Y, w: W+8, h: H },
-  { id: 'concluida',         x: 618, y: ROW1_Y, w: W,   h: H },
+  { id: 'backlog', x: 0, y: ROW1_Y, w: W, h: H },
+  { id: 'tarefinha', x: 150, y: ROW1_Y, w: W, h: H },
+  { id: 'tarefa', x: 300, y: ROW1_Y, w: W, h: H },
+  { id: 'em-progresso', x: 450, y: ROW1_Y, w: W + 8, h: H },
+  { id: 'concluida', x: 618, y: ROW1_Y, w: W, h: H },
   // Row 2 — off-path (y=100)
-  { id: 'aguardando_humano', x: 450, y: 110, w: W+8, h: H },
-  { id: 'bloqueada',         x: 450, y: 190, w: W,   h: H },
+  { id: 'aguardando_humano', x: 450, y: 110, w: W + 8, h: H },
+  { id: 'bloqueada', x: 450, y: 190, w: W, h: H },
 ]
 
-function cx(n: Node) { return n.x + n.w / 2 }
-function cy(n: Node) { return n.y + n.h / 2 }
-function nodeById(id: string) { return nodes.find(n => n.id === id)! }
+function cx(n: Node) {
+  return n.x + n.w / 2
+}
+function cy(n: Node) {
+  return n.y + n.h / 2
+}
+function nodeById(id: string) {
+  return nodes.find((n) => n.id === id)!
+}
 
-interface Edge { from: string; to: string; dashed?: boolean; label?: string }
+interface Edge {
+  from: string
+  to: string
+  dashed?: boolean
+  label?: string
+}
 const edges: Edge[] = [
-  { from: 'backlog',           to: 'tarefinha' },
-  { from: 'tarefinha',         to: 'tarefa' },
-  { from: 'tarefa',            to: 'em-progresso' },
-  { from: 'em-progresso',      to: 'concluida' },
-  { from: 'em-progresso',      to: 'aguardando_humano' },
+  { from: 'backlog', to: 'tarefinha' },
+  { from: 'tarefinha', to: 'tarefa' },
+  { from: 'tarefa', to: 'em-progresso' },
+  { from: 'em-progresso', to: 'concluida' },
+  { from: 'em-progresso', to: 'aguardando_humano' },
   { from: 'aguardando_humano', to: 'bloqueada' },
   { from: 'aguardando_humano', to: 'em-progresso', dashed: true, label: 'resolvido' },
-  { from: 'bloqueada',         to: 'em-progresso', dashed: true, label: 'desbloqueado' },
+  { from: 'bloqueada', to: 'em-progresso', dashed: true, label: 'desbloqueado' },
 ]
 
 function edgePath(e: Edge): string {
-  const f = nodeById(e.from), t = nodeById(e.to)
+  const f = nodeById(e.from),
+    t = nodeById(e.to)
   // right (same row)
-  if (t.y === f.y && t.x > f.x)
-    return `M ${f.x + f.w} ${cy(f)} L ${t.x - 2} ${cy(t)}`
+  if (t.y === f.y && t.x > f.x) return `M ${f.x + f.w} ${cy(f)} L ${t.x - 2} ${cy(t)}`
   // down (same column)
   if (Math.abs(cx(f) - cx(t)) < 4 && t.y > f.y)
     return `M ${cx(f)} ${f.y + f.h} L ${cx(t)} ${t.y - 2}`
@@ -80,27 +104,37 @@ function edgeMid(e: Edge): { x: number; y: number } | null {
   if (!e.label) return null
   const f = nodeById(e.from)
   if (e.from === 'aguardando_humano') return { x: f.x - 44, y: cy(f) - 6 }
-  if (e.from === 'bloqueada')         return { x: f.x - 62, y: cy(f) - 6 }
+  if (e.from === 'bloqueada') return { x: f.x - 62, y: cy(f) - 6 }
   return null
 }
 
 // Node colors per state (border changes when active)
 const NODE_BG: Record<string, string> = {
-  backlog:           '#170f04', tarefinha:  '#1a1206',
-  tarefa:            '#1c1708', 'em-progresso': '#1e1808',
-  aguardando_humano: '#1e1208', bloqueada:  '#1c0808',
-  concluida:         '#081808',
+  backlog: '#170f04',
+  tarefinha: '#1a1206',
+  tarefa: '#1c1708',
+  'em-progresso': '#1e1808',
+  aguardando_humano: '#1e1208',
+  bloqueada: '#1c0808',
+  concluida: '#081808',
 }
 const NODE_BORDER: Record<string, string> = {
-  backlog:           '#2e2210', tarefinha:  '#4a3418',
-  tarefa:            '#5a501a', 'em-progresso': '#8b6914',
-  aguardando_humano: '#7a4a10', bloqueada:  '#7a2020',
-  concluida:         '#286028',
+  backlog: '#2e2210',
+  tarefinha: '#4a3418',
+  tarefa: '#5a501a',
+  'em-progresso': '#8b6914',
+  aguardando_humano: '#7a4a10',
+  bloqueada: '#7a2020',
+  concluida: '#286028',
 }
 const COUNT_COLOR: Record<string, string> = {
-  backlog: '#3a2e14', tarefinha: '#8b6914', tarefa: '#a09020',
-  'em-progresso': '#c9a84c', aguardando_humano: '#c07830',
-  bloqueada: '#cc5050', concluida: '#50aa50',
+  backlog: '#3a2e14',
+  tarefinha: '#8b6914',
+  tarefa: '#a09020',
+  'em-progresso': '#c9a84c',
+  aguardando_humano: '#c07830',
+  bloqueada: '#cc5050',
+  concluida: '#50aa50',
 }
 
 function smSVG(counts: Record<string, number>): string {
@@ -108,18 +142,19 @@ function smSVG(counts: Record<string, number>): string {
   // viewBox minX gives left margin; width = (728+pad) - minX
   const PAD = 16
   const minX = -PAD
-  const maxX = 728 + PAD   // concluida right edge + margin
-  const maxY = 230 + PAD   // bloqueada bottom edge + margin
+  const maxX = 728 + PAD // concluida right edge + margin
+  const maxY = 230 + PAD // bloqueada bottom edge + margin
   const svgW = maxX - minX
   const svgH = maxY
 
-  const nodeSvg = nodes.map(n => {
-    const count = counts[n.id] ?? 0
-    const bg     = NODE_BG[n.id]   ?? '#170f04'
-    const border = count > 0 ? (NODE_BORDER[n.id] ?? '#5a3e1b') : '#261a08'
-    const labelC = count > 0 ? '#c9a84c' : '#3e2e14'
-    const countC = COUNT_COLOR[n.id] ?? '#3a2e14'
-    return `
+  const nodeSvg = nodes
+    .map((n) => {
+      const count = counts[n.id] ?? 0
+      const bg = NODE_BG[n.id] ?? '#170f04'
+      const border = count > 0 ? (NODE_BORDER[n.id] ?? '#5a3e1b') : '#261a08'
+      const labelC = count > 0 ? '#c9a84c' : '#3e2e14'
+      const countC = COUNT_COLOR[n.id] ?? '#3a2e14'
+      return `
   <rect id="node-${n.id}" x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}"
         fill="${bg}" stroke="${border}" stroke-width="1.5" rx="2"/>
   <text x="${cx(n)}" y="${n.y + H / 2 - 5}" text-anchor="middle"
@@ -127,19 +162,26 @@ function smSVG(counts: Record<string, number>): string {
   <text id="count-${n.id}" x="${cx(n)}" y="${n.y + H - 7}" text-anchor="middle"
         font-size="14" font-weight="bold" fill="${count > 0 ? countC : '#2e2010'}"
         font-family="Palatino,serif">${count}</text>`
-  }).join('')
+    })
+    .join('')
 
-  const edgeSvg = edges.map(e => {
-    const dashed = e.dashed ? 'stroke-dasharray="4 3"' : ''
-    const col = e.dashed ? '#2e2010' : '#4a3418'
-    const d = edgePath(e)
-    const mid = edgeMid(e)
-    return `
+  const edgeSvg = edges
+    .map((e) => {
+      const dashed = e.dashed ? 'stroke-dasharray="4 3"' : ''
+      const col = e.dashed ? '#2e2010' : '#4a3418'
+      const d = edgePath(e)
+      const mid = edgeMid(e)
+      return `
   <path d="${d}" stroke="${col}" stroke-width="1.2" fill="none"
         marker-end="url(#arr)" ${dashed}/>
-  ${mid ? `<text x="${mid.x}" y="${mid.y}" text-anchor="middle"
-             font-size="8" fill="#2e2010" font-family="Palatino,serif">${e.label}</text>` : ''}`
-  }).join('')
+  ${
+    mid
+      ? `<text x="${mid.x}" y="${mid.y}" text-anchor="middle"
+             font-size="8" fill="#2e2010" font-family="Palatino,serif">${e.label}</text>`
+      : ''
+  }`
+    })
+    .join('')
 
   return `<svg id="sm-svg" viewBox="${minX} 0 ${svgW} ${svgH}" width="100%" style="max-width:${svgW}px;display:block">
 <defs>
@@ -163,18 +205,22 @@ ${nodeSvg}
 // Project pipeline rows -------------------------------------------------------
 
 const STATE_COLORS: Record<string, string> = {
-  concluida: '#286028', 'em-progresso': '#8b6914', tarefa: '#5a5018',
-  tarefinha: '#3e2e14', aguardando_humano: '#7a4010',
-  bloqueada: '#7a1818', backlog: '#221a08',
+  concluida: '#286028',
+  'em-progresso': '#8b6914',
+  tarefa: '#5a5018',
+  tarefinha: '#3e2e14',
+  aguardando_humano: '#7a4010',
+  bloqueada: '#7a1818',
+  backlog: '#221a08',
 }
 
 function taskBar(tasks: VaultProject['tasks']): string {
   if (!tasks.length) return '<span class="no-tasks">sem tasks</span>'
   const total = tasks.length
-  return STATE_ORDER.map(s => {
-    const n = tasks.filter(t => t.state === s).length
+  return STATE_ORDER.map((s) => {
+    const n = tasks.filter((t) => t.state === s).length
     if (!n) return ''
-    const pct = (n / total * 100).toFixed(1)
+    const pct = ((n / total) * 100).toFixed(1)
     return `<div class="bar-seg" style="width:${pct}%;background:${STATE_COLORS[s] ?? '#222'}"
                   title="${STATE_LABELS[s]}: ${n}"></div>`
   }).join('')
@@ -182,33 +228,46 @@ function taskBar(tasks: VaultProject['tasks']): string {
 
 function agentPipeline(p: VaultProject): string {
   const steps = p.pipeline?.length ? p.pipeline : p.agent ? [p.agent] : ['—']
-  return steps.map((a, i) =>
-    `<span class="agent-chip" data-agent="${a}">${a}</span>${i < steps.length - 1 ? '<span class="pipe-arr">→</span>' : ''}`
-  ).join('')
+  return steps
+    .map(
+      (a, i) =>
+        `<span class="agent-chip" data-agent="${a}">${a}</span>${i < steps.length - 1 ? '<span class="pipe-arr">→</span>' : ''}`,
+    )
+    .join('')
 }
 
 function healthColor(h: string): string {
-  return { ok: '#286028', 'at-risk': '#8b6914', overdue: '#8a2020', idle: '#2e2010' }[h] ?? '#2e2010'
+  return (
+    { ok: '#286028', 'at-risk': '#8b6914', overdue: '#8a2020', idle: '#2e2010' }[h] ?? '#2e2010'
+  )
 }
 
 function relTime(iso?: string): string {
   if (!iso) return '—'
   const d = Date.now() - new Date(iso).getTime()
-  if (d < 60_000)      return 'agora'
-  if (d < 3_600_000)   return `${Math.floor(d / 60_000)}m atrás`
-  if (d < 86_400_000)  return `${Math.floor(d / 3_600_000)}h atrás`
+  if (d < 60_000) return 'agora'
+  if (d < 3_600_000) return `${Math.floor(d / 60_000)}m atrás`
+  if (d < 86_400_000) return `${Math.floor(d / 3_600_000)}h atrás`
   return `${Math.floor(d / 86_400_000)}d atrás`
 }
 
 function projectRows(projects: VaultProject[]): string {
   return projects
-    .sort((a, b) => ({ high: 0, medium: 1, low: 2 }[a.priority] ?? 1) - ({ high: 0, medium: 1, low: 2 }[b.priority] ?? 1))
-    .map(p => {
-      const h = (p as Record<string, unknown> & typeof p)['health'] as { health: string } | undefined
+    .sort(
+      (a, b) =>
+        (({ high: 0, medium: 1, low: 2 })[a.priority] ?? 1) -
+        ({ high: 0, medium: 1, low: 2 }[b.priority] ?? 1),
+    )
+    .map((p) => {
+      const h = (p as Record<string, unknown> & typeof p)['health'] as
+        | { health: string }
+        | undefined
       const health = h?.health ?? 'idle'
       const hc = healthColor(health)
-      const pending = p.tasks.filter(t => t.progresso < 100).length
-      const blocked = p.tasks.filter(t => t.state === 'bloqueada' || t.state === 'aguardando_humano').length
+      const pending = p.tasks.filter((t) => t.progresso < 100).length
+      const blocked = p.tasks.filter(
+        (t) => t.state === 'bloqueada' || t.state === 'aguardando_humano',
+      ).length
       return `<tr class="proj-row" data-project="${p.id}">
   <td class="p-name">
     <span class="h-dot" style="background:${hc}"></span>${p.id}
@@ -222,14 +281,14 @@ function projectRows(projects: VaultProject[]): string {
   </td>
   <td class="p-run">${p.lastStatus === 'failed' ? '<span class="fail">✗</span> ' : ''}${relTime(p.lastRun)}</td>
 </tr>`
-    }).join('\n')
+    })
+    .join('\n')
 }
 
 function depsSection(projects: VaultProject[]): string {
   const taskMap = new Map<string, string>()
   for (const p of projects)
-    for (const t of p.tasks)
-      taskMap.set(t.id, `${p.id} / ${t.title.slice(0, 36)}`)
+    for (const t of p.tasks) taskMap.set(t.id, `${p.id} / ${t.title.slice(0, 36)}`)
 
   const items: string[] = []
   for (const p of projects)
@@ -237,7 +296,7 @@ function depsSection(projects: VaultProject[]): string {
       if (t.depends?.length)
         items.push(`<li><span class="dep-t">${p.id} / ${t.title.slice(0, 40)}</span>
           <span class="dep-sep"> depende de </span>
-          <span class="dep-n">${t.depends.map(d => taskMap.get(d) ?? `<em>${d}</em>`).join(', ')}</span></li>`)
+          <span class="dep-n">${t.depends.map((d) => taskMap.get(d) ?? `<em>${d}</em>`).join(', ')}</span></li>`)
 
   if (!items.length) return ''
   return `<section><h2>Dependências de Tasks</h2><ul class="dep-list">${items.join('')}</ul></section>`
@@ -246,7 +305,7 @@ function depsSection(projects: VaultProject[]): string {
 // Main render ----------------------------------------------------------------
 
 export function renderFlow(projects: VaultProject[]): string {
-  const counts: Record<string, number> = Object.fromEntries(STATE_ORDER.map(s => [s, 0]))
+  const counts: Record<string, number> = Object.fromEntries(STATE_ORDER.map((s) => [s, 0]))
   for (const p of projects)
     for (const t of p.tasks)
       if (Object.prototype.hasOwnProperty.call(counts, t.state))
@@ -369,8 +428,9 @@ export function renderFlow(projects: VaultProject[]): string {
   <h2>Ciclo de Vida das Tasks</h2>
   <div class="sm-wrap" id="sm-wrap">${smSVG(counts)}</div>
   <div class="sm-legend" id="sm-legend">
-    ${STATE_ORDER.map(s =>
-      `<span data-state="${s}"><b id="lc-${s}">${counts[s] ?? 0}</b> ${STATE_LABELS[s]}</span>`
+    ${STATE_ORDER.map(
+      (s) =>
+        `<span data-state="${s}"><b id="lc-${s}">${counts[s] ?? 0}</b> ${STATE_LABELS[s]}</span>`,
     ).join(' · ')}
   </div>
 </section>

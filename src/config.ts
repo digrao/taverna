@@ -16,6 +16,10 @@ export interface TavernaConfig {
   gdriveBasePath: string
   // Default agent per project tipo when project.agent is not set
   agentDefaults: Record<string, string>
+  // Scheduler idle detection (minutes without Claude Code activity → consider idle)
+  idleThresholdMinutes?: number
+  // Default run_window when project does not specify one
+  defaultRunWindow?: string
 }
 
 /** Load KEY=VALUE pairs from <vaultPath>/.env into process.env (non-destructive). */
@@ -28,12 +32,17 @@ function loadVaultEnv(vaultPath: string): void {
     const eq = trimmed.indexOf('=')
     if (eq === -1) continue
     const key = trimmed.slice(0, eq).trim()
-    const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, '')
+    const val = trimmed
+      .slice(eq + 1)
+      .trim()
+      .replace(/^["']|["']$/g, '')
     if (key && !(key in process.env)) process.env[key] = val
   }
 }
 
-export function defineConfig(overrides: Partial<TavernaConfig> & { vaultPath: string }): TavernaConfig {
+export function defineConfig(
+  overrides: Partial<TavernaConfig> & { vaultPath: string },
+): TavernaConfig {
   loadVaultEnv(overrides.vaultPath)
 
   const copypartyUrl = overrides.copypartyUrl ?? process.env['COPYPARTY_URL']
@@ -44,22 +53,40 @@ export function defineConfig(overrides: Partial<TavernaConfig> & { vaultPath: st
     directivesDir: overrides.directivesDir ?? '60_Agents/1_Directives',
     logbooksDir: overrides.logbooksDir ?? '60_Agents/2_Logbooks',
     morningOutputDir: overrides.morningOutputDir ?? '60_Agents/5_Inbox',
-    morningFilename: overrides.morningFilename ?? ((d) =>
-      `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-morning.md`
-    ),
+    morningFilename:
+      overrides.morningFilename ??
+      ((d) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-morning.md`),
     uspFolderPrefixes: overrides.uspFolderPrefixes ?? ['PSI', 'PEA', 'PEF'],
     scheduledDir: overrides.scheduledDir ?? '60_Agents/5_Schedueled',
     assetExtensions: overrides.assetExtensions ?? [
-      'pdf', 'ppt', 'pptx', 'zip', 'docx', 'mat', 'vhd',
-      'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg',
+      'pdf',
+      'ppt',
+      'pptx',
+      'zip',
+      'docx',
+      'mat',
+      'vhd',
+      'jpg',
+      'jpeg',
+      'png',
+      'gif',
+      'bmp',
+      'webp',
+      'svg',
     ],
     gdriveRemote: overrides.gdriveRemote ?? 'jv',
     gdriveBasePath: overrides.gdriveBasePath ?? 'obsidian',
     agentDefaults: overrides.agentDefaults ?? {
-      'USP': '@study-assistant',
-      'BB':  '@planner',
-      '*':   '@dev-agent',
+      USP: '@study-assistant',
+      BB: '@planner',
+      '*': '@dev-agent',
     },
+    ...(overrides.idleThresholdMinutes !== undefined
+      ? { idleThresholdMinutes: overrides.idleThresholdMinutes }
+      : {}),
+    ...(overrides.defaultRunWindow !== undefined
+      ? { defaultRunWindow: overrides.defaultRunWindow }
+      : {}),
     ...(copypartyUrl !== undefined ? { copypartyUrl } : {}),
   }
 }

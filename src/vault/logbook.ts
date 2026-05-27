@@ -1,5 +1,5 @@
 import { readFile, appendFile, mkdir, writeFile } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
+import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import type { LogbookEntry } from './types.js'
 import type { TavernaConfig } from '../config.js'
@@ -35,7 +35,7 @@ export async function readLogbook(agentId: string, config: TavernaConfig): Promi
   const entries: LogbookEntry[] = []
 
   // Split on h2 headings (keep delimiter)
-  const sections = raw.split(/(?=^## )/m).filter(s => s.trim())
+  const sections = raw.split(/(?=^## )/m).filter((s) => s.trim())
 
   for (const section of sections) {
     const firstLine = section.split('\n')[0] ?? ''
@@ -94,7 +94,11 @@ export async function appendProjectLogbook(
   const { existsSync } = await import('node:fs')
   if (!existsSync(filePath)) {
     const projectId = entry.projectName
-    await writeFile(filePath, `# Logbook — ${projectId}\n\n<!-- append entries below; newest at bottom -->\n`, 'utf8')
+    await writeFile(
+      filePath,
+      `# Logbook — ${projectId}\n\n<!-- append entries below; newest at bottom -->\n`,
+      'utf8',
+    )
   }
 
   const heading = `## [${timestamp}] ${entry.projectName}\n`

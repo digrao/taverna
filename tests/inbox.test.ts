@@ -1,15 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import {
-  scanInbox,
-  selectBatch,
-  buildPrompt,
-  parseClassifications,
-} from '../src/inbox/process.js'
-import { parseFrontmatter } from '../src/vault/frontmatter.js'
+import { scanInbox, selectBatch, buildPrompt, parseClassifications } from '../src/inbox/process.js'
 
 let tmpDir: string
 
@@ -22,7 +16,7 @@ afterEach(() => {
   rmSync(tmpDir, { recursive: true, force: true })
 })
 
-function write(relPath: string, content: string): string {
+function _write(relPath: string, content: string): string {
   const full = join(tmpDir, relPath)
   mkdirSync(join(full, '..'), { recursive: true })
   writeFileSync(full, content, 'utf8')
@@ -55,7 +49,7 @@ describe('scanInbox', () => {
     writeFileSync(join(dir, 'a.md'), 'a')
     writeFileSync(join(dir, 'b.md'), 'b')
     const files = await scanInbox(dir)
-    expect(files.map(f => f.filename)).toEqual(['a.md', 'b.md', 'c.md'])
+    expect(files.map((f) => f.filename)).toEqual(['a.md', 'b.md', 'c.md'])
   })
 })
 
@@ -146,7 +140,8 @@ describe('parseClassifications', () => {
   })
 
   it('parses multiple entries', () => {
-    const output = '```json\n' +
+    const output =
+      '```json\n' +
       '[{"file":"a.md","cluster":"infra","relevancia":5},' +
       '{"file":"b.md","cluster":"estudo","relevancia":2}]\n```'
     const cls = parseClassifications(output)

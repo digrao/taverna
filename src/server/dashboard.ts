@@ -13,7 +13,10 @@ function relativeTime(iso?: string): string {
 function nextRunIn(project: VaultProject): string {
   if (project.runEvery === 'never') return 'manual'
   const freqMs: Record<string, number> = {
-    hourly: 3_600_000, daily: 86_400_000, weekly: 604_800_000, monthly: 2_592_000_000,
+    hourly: 3_600_000,
+    daily: 86_400_000,
+    weekly: 604_800_000,
+    monthly: 2_592_000_000,
   }
   const freq = freqMs[project.runEvery]
   if (!freq || !project.lastRun) return project.runEvery
@@ -34,14 +37,22 @@ function healthLabel(h: string): string {
 }
 
 function pipelineHtml(project: VaultProject): string {
-  const agents = project.pipeline?.length ? project.pipeline : project.agent ? [project.agent] : ['—']
-  return agents.map(a => `<span class="pipe-step">${a}</span>`).join('<span class="pipe-arrow">→</span>')
+  const agents = project.pipeline?.length
+    ? project.pipeline
+    : project.agent
+      ? [project.agent]
+      : ['—']
+  return agents
+    .map((a) => `<span class="pipe-step">${a}</span>`)
+    .join('<span class="pipe-arrow">→</span>')
 }
 
 function projectCard(p: VaultProject, dailyCost: number): string {
   const h = computeHealth(p)
-  const pending = p.tasks.filter(t => t.progresso < 100).length
-  const blocked = p.tasks.filter(t => t.progresso < 100 && (t.state === 'bloqueada' || t.state === 'aguardando_humano')).length
+  const pending = p.tasks.filter((t) => t.progresso < 100).length
+  const blocked = p.tasks.filter(
+    (t) => t.progresso < 100 && (t.state === 'bloqueada' || t.state === 'aguardando_humano'),
+  ).length
   const lastStatus = p.lastStatus ?? 'idle'
   const costStr = dailyCost > 0 ? `$${dailyCost.toFixed(4)}` : '$0'
 
@@ -83,14 +94,17 @@ function projectCard(p: VaultProject, dailyCost: number): string {
   </div>`
 }
 
-export function renderDashboard(projects: VaultProject[], dailyCosts: Record<string, number>): string {
+export function renderDashboard(
+  projects: VaultProject[],
+  dailyCosts: Record<string, number>,
+): string {
   const totalCost = Object.values(dailyCosts).reduce((s, v) => s + v, 0)
   const cards = projects
     .sort((a, b) => {
       const po = { high: 0, medium: 1, low: 2 }
       return (po[a.priority] ?? 1) - (po[b.priority] ?? 1)
     })
-    .map(p => projectCard(p, dailyCosts[p.id] ?? 0))
+    .map((p) => projectCard(p, dailyCosts[p.id] ?? 0))
     .join('\n')
 
   return `<!DOCTYPE html>
@@ -295,6 +309,8 @@ export function renderDashboard(projects: VaultProject[], dailyCosts: Record<str
   <h1>Taverna</h1>
   <div class="header-right">
     <a href="/flow" style="color:#8b6914;font-size:.9em;text-decoration:none;border:1px solid #3a2e14;padding:4px 10px;white-space:nowrap">Fluxo →</a>
+    <a href="/slides" style="color:#8b6914;font-size:.9em;text-decoration:none;border:1px solid #3a2e14;padding:4px 10px;white-space:nowrap">Slides →</a>
+    <a href="/infraestrutura" style="color:#8b6914;font-size:.9em;text-decoration:none;border:1px solid #3a2e14;padding:4px 10px;white-space:nowrap">Infra →</a>
     <span class="total-cost" id="total-cost">$${totalCost.toFixed(4)} hoje</span>
     <span class="status-bar">
       <span class="sse-dot" id="sse-dot"></span>

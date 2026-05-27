@@ -8,20 +8,15 @@ import {
   getPriority,
   getRunEvery,
   getProgress,
-  getString,
 } from '../src/vault/frontmatter.js'
 
 import { progressToState, readProjectTasks } from '../src/vault/task.js'
 import { detectProjectType, readProject, scanProjects } from '../src/vault/project.js'
 import { discoverAgents, readAgent } from '../src/vault/agent.js'
 import { readLogbook, appendLogbook } from '../src/vault/logbook.js'
-import {
-  sortByPriority,
-  filterByAgent,
-  getPendingTasks,
-} from '../src/vault/index.js'
+import { sortByPriority, filterByAgent, getPendingTasks } from '../src/vault/index.js'
 import { updateProjectStatus } from '../src/vault/update.js'
-import type { VaultProject, Priority } from '../src/vault/types.js'
+import type { VaultProject } from '../src/vault/types.js'
 import { defineConfig } from '../src/config.js'
 import { readFileSync } from 'node:fs'
 
@@ -200,7 +195,10 @@ describe('readProjectTasks', () => {
   })
 
   it('parses frontmatter fields from task file', async () => {
-    write('tasks/t1.md', '---\nprogresso: 50%\nprioridade: alta\ndeadline: 2026-06-01\nasset_folder: ../assets/1_Aula\n---\n# My Task\nbody text')
+    write(
+      'tasks/t1.md',
+      '---\nprogresso: 50%\nprioridade: alta\ndeadline: 2026-06-01\nasset_folder: ../assets/1_Aula\n---\n# My Task\nbody text',
+    )
     const tasks = await readProjectTasks(tmpDir)
     expect(tasks).toHaveLength(1)
     const t = tasks[0]!
@@ -249,7 +247,7 @@ describe('readProjectTasks', () => {
     write('tasks/high.md', '---\nprioridade: alta\n---\n# High')
     write('tasks/med.md', '---\nprioridade: média\n---\n# Med')
     const tasks = await readProjectTasks(tmpDir)
-    expect(tasks.map(t => t.prioridade)).toEqual(['high', 'medium', 'low'])
+    expect(tasks.map((t) => t.prioridade)).toEqual(['high', 'medium', 'low'])
   })
 })
 
@@ -259,32 +257,32 @@ describe('scanProjects', () => {
   it('finds loose .md files in projects dir', async () => {
     write('10_Projects/MyProject.md', '---\nid: MyProject\ntype: personal\n---\n# My Project')
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
-    expect(projects.some(p => p.id === 'MyProject')).toBe(true)
+    expect(projects.some((p) => p.id === 'MyProject')).toBe(true)
   })
 
   it('finds folder projects (folder/Folder.md pattern)', async () => {
     write('10_Projects/PSI3451/PSI3451.md', '---\nid: PSI3451\ntype: study\n---\n# PSI3451')
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
-    expect(projects.some(p => p.id === 'PSI3451')).toBe(true)
+    expect(projects.some((p) => p.id === 'PSI3451')).toBe(true)
   })
 
   it('ignores folders without matching .md file', async () => {
     mkdirSync(join(tmpDir, '10_Projects', 'EmptyFolder'), { recursive: true })
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
-    expect(projects.some(p => p.name === 'EmptyFolder')).toBe(false)
+    expect(projects.some((p) => p.name === 'EmptyFolder')).toBe(false)
   })
 
   it('ignores hidden folders like .obsidian', async () => {
     write('.obsidian/config.json', '{}')
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
-    expect(projects.some(p => p.name === '.obsidian')).toBe(false)
+    expect(projects.some((p) => p.name === '.obsidian')).toBe(false)
   })
 
   it('sets hasTasksFolder true when tasks/ exists', async () => {
     write('10_Projects/PSI3451/PSI3451.md', '---\nid: PSI3451\n---\n# PSI3451')
     write('10_Projects/PSI3451/tasks/1.md', '---\nprogresso: 0%\n---\n# Task')
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
-    const p = projects.find(p => p.id === 'PSI3451')!
+    const p = projects.find((p) => p.id === 'PSI3451')!
     expect(p.hasTasksFolder).toBe(true)
   })
 
@@ -292,14 +290,14 @@ describe('scanProjects', () => {
     write('10_Projects/PSI3451/PSI3451.md', '---\nid: PSI3451\n---\n# PSI3451')
     mkdirSync(join(tmpDir, '10_Projects', 'PSI3451', 'assets'), { recursive: true })
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
-    const p = projects.find(p => p.id === 'PSI3451')!
+    const p = projects.find((p) => p.id === 'PSI3451')!
     expect(p.hasAssetsFolder).toBe(true)
   })
 
   it('returns tasks: [] when tasks/ folder does not exist', async () => {
     write('10_Projects/PSI3451/PSI3451.md', '---\nid: PSI3451\n---\n# PSI3451')
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
-    const p = projects.find(p => p.id === 'PSI3451')!
+    const p = projects.find((p) => p.id === 'PSI3451')!
     expect(p.tasks).toEqual([])
     expect(p.hasTasksFolder).toBe(false)
   })
@@ -308,14 +306,14 @@ describe('scanProjects', () => {
     write('10_Projects/MyFolder/MyFolder.md', '---\nid: explicit-id\n---\n# Project')
     write('10_Projects/NoId/NoId.md', '---\n---\n# No ID')
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
-    expect(projects.some(p => p.id === 'explicit-id')).toBe(true)
-    expect(projects.some(p => p.id === 'NoId')).toBe(true)
+    expect(projects.some((p) => p.id === 'explicit-id')).toBe(true)
+    expect(projects.some((p) => p.id === 'NoId')).toBe(true)
   })
 
   it('loose .md has folderPath undefined', async () => {
     write('10_Projects/Loose.md', '---\nid: Loose\n---\n# Loose')
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
-    const p = projects.find(p => p.id === 'Loose')!
+    const p = projects.find((p) => p.id === 'Loose')!
     expect(p.folderPath).toBeUndefined()
     expect(p.hasTasksFolder).toBe(false)
     expect(p.hasAssetsFolder).toBe(false)
@@ -324,19 +322,21 @@ describe('scanProjects', () => {
   it('USP project has tipo USP', async () => {
     write('10_Projects/PSI3451/PSI3451.md', '---\nid: PSI3451\n---\n# PSI3451')
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
-    expect(projects.find(p => p.id === 'PSI3451')!.tipo).toBe('USP')
+    expect(projects.find((p) => p.id === 'PSI3451')!.tipo).toBe('USP')
   })
 
   it('work project has tipo BB', async () => {
     write('10_Projects/Proj.md', '---\nid: BB1\ntype: work\n---\n# BB Project')
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
-    expect(projects.find(p => p.id === 'BB1')!.tipo).toBe('BB')
+    expect(projects.find((p) => p.id === 'BB1')!.tipo).toBe('BB')
   })
 })
 
 describe('readProject', () => {
   it('parses a full project file', async () => {
-    const path = write('proj/PSI3421.md', `---
+    const path = write(
+      'proj/PSI3421.md',
+      `---
 id: PSI3421
 agent: '@study-assistant'
 type: study
@@ -347,7 +347,8 @@ _last_status: success
 _runs_total: 5
 edisciplinas: https://example.com
 ---
-# PSI3421 content`)
+# PSI3421 content`,
+    )
     const project = await readProject(path, ['PSI', 'PEA', 'PEF'])
     expect(project.id).toBe('PSI3421')
     expect(project.tipo).toBe('USP')
@@ -367,33 +368,40 @@ edisciplinas: https://example.com
 
 describe('discoverAgents', () => {
   it('finds all directives.md entries', async () => {
-    write('60_Agents/1_Directives/planner/directives.md',
-      '---\nname: "@planner"\nrunner: claude\ndescription: Planeja sprints\n---\nDo planning.')
-    write('60_Agents/1_Directives/study-assistant/directives.md',
-      '---\nname: "@study-assistant"\nrunner: claude\n---\nStudy help.')
+    write(
+      '60_Agents/1_Directives/planner/directives.md',
+      '---\nname: "@planner"\nrunner: claude\ndescription: Planeja sprints\n---\nDo planning.',
+    )
+    write(
+      '60_Agents/1_Directives/study-assistant/directives.md',
+      '---\nname: "@study-assistant"\nrunner: claude\n---\nStudy help.',
+    )
     const agents = await discoverAgents(join(tmpDir, '60_Agents/1_Directives'))
     expect(agents).toHaveLength(2)
-    expect(agents.some(a => a.id === '@planner')).toBe(true)
-    expect(agents.some(a => a.id === '@study-assistant')).toBe(true)
+    expect(agents.some((a) => a.id === '@planner')).toBe(true)
+    expect(agents.some((a) => a.id === '@study-assistant')).toBe(true)
   })
 
   it('agent name falls back to @<foldername> when not in frontmatter', async () => {
-    write('60_Agents/1_Directives/reviewer/directives.md',
-      '---\nrunner: ollama\nmodel: hermes3:8b\n---\nReview code.')
+    write(
+      '60_Agents/1_Directives/reviewer/directives.md',
+      '---\nrunner: ollama\nmodel: hermes3:8b\n---\nReview code.',
+    )
     const agents = await discoverAgents(join(tmpDir, '60_Agents/1_Directives'))
     expect(agents[0]!.id).toBe('@reviewer')
   })
 
   it('agent runner defaults to claude when not specified', async () => {
-    write('60_Agents/1_Directives/myagent/directives.md',
-      '---\nname: "@myagent"\n---\nDirectives.')
+    write('60_Agents/1_Directives/myagent/directives.md', '---\nname: "@myagent"\n---\nDirectives.')
     const agents = await discoverAgents(join(tmpDir, '60_Agents/1_Directives'))
     expect(agents[0]!.runner.type).toBe('claude')
   })
 
   it('directive text contains body text not frontmatter', async () => {
-    write('60_Agents/1_Directives/a/directives.md',
-      '---\nname: "@a"\n---\nThis is the directive body.')
+    write(
+      '60_Agents/1_Directives/a/directives.md',
+      '---\nname: "@a"\n---\nThis is the directive body.',
+    )
     const agents = await discoverAgents(join(tmpDir, '60_Agents/1_Directives'))
     expect(agents[0]!.directiveText).toContain('directive body')
     expect(agents[0]!.directiveText).not.toContain('name:')
@@ -406,8 +414,10 @@ describe('discoverAgents', () => {
   })
 
   it('sets ollama model when specified', async () => {
-    write('60_Agents/1_Directives/reviewer/directives.md',
-      '---\nname: "@reviewer"\nrunner: ollama\nmodel: hermes3:8b\n---\nReview.')
+    write(
+      '60_Agents/1_Directives/reviewer/directives.md',
+      '---\nname: "@reviewer"\nrunner: ollama\nmodel: hermes3:8b\n---\nReview.',
+    )
     const agents = await discoverAgents(join(tmpDir, '60_Agents/1_Directives'))
     const a = agents[0]!
     expect(a.runner.type).toBe('ollama')
@@ -418,8 +428,10 @@ describe('discoverAgents', () => {
 describe('readAgent', () => {
   it('reads a single agent folder', async () => {
     const folderPath = join(tmpDir, 'agents/planner')
-    write('agents/planner/directives.md',
-      '---\nname: "@planner"\nrunner: claude\ndescription: Plans sprints\n---\nPlan work.')
+    write(
+      'agents/planner/directives.md',
+      '---\nname: "@planner"\nrunner: claude\ndescription: Plans sprints\n---\nPlan work.',
+    )
     const agent = await readAgent(folderPath)
     expect(agent.id).toBe('@planner')
     expect(agent.description).toBe('Plans sprints')
@@ -437,12 +449,15 @@ describe('readLogbook', () => {
   })
 
   it('parses executor format: ## [ISO_TIMESTAMP] ProjectName', async () => {
-    write('60_Agents/2_Logbooks/planner.md', `## [2026-05-19T14:14:05.847151] Alterações do APP Parceiros
+    write(
+      '60_Agents/2_Logbooks/planner.md',
+      `## [2026-05-19T14:14:05.847151] Alterações do APP Parceiros
 **Success:** True
 **Duration:** 6.41s
 
 some output here
-`)
+`,
+    )
     const config = defineConfig({ vaultPath: tmpDir })
     const entries = await readLogbook('@planner', config)
     expect(entries).toHaveLength(1)
@@ -453,10 +468,13 @@ some output here
   })
 
   it('parses study-assistant format: ## YYYY-MM-DD HH:MM — ProjectName', async () => {
-    write('60_Agents/2_Logbooks/study-assistant.md', `## 2026-05-19 14:17 — PSI3441/Configuração + Atividades
+    write(
+      '60_Agents/2_Logbooks/study-assistant.md',
+      `## 2026-05-19 14:17 — PSI3441/Configuração + Atividades
 - Modo: C
 - Itens fechados: nenhum
-`)
+`,
+    )
     const config = defineConfig({ vaultPath: tmpDir })
     const entries = await readLogbook('@study-assistant', config)
     expect(entries).toHaveLength(1)
@@ -465,24 +483,30 @@ some output here
   })
 
   it('returns entries in chronological order', async () => {
-    write('60_Agents/2_Logbooks/planner.md', `## [2026-05-19T10:00:00] First
+    write(
+      '60_Agents/2_Logbooks/planner.md',
+      `## [2026-05-19T10:00:00] First
 content
 
 ## [2026-05-19T08:00:00] Second
 content
-`)
+`,
+    )
     const config = defineConfig({ vaultPath: tmpDir })
     const entries = await readLogbook('@planner', config)
     expect(entries[0]!.timestamp < entries[1]!.timestamp).toBe(true)
   })
 
   it('handles logbook file with multiple entries', async () => {
-    write('60_Agents/2_Logbooks/planner.md', `## [2026-05-19T10:00:00] Proj1
+    write(
+      '60_Agents/2_Logbooks/planner.md',
+      `## [2026-05-19T10:00:00] Proj1
 content1
 
 ## [2026-05-19T11:00:00] Proj2
 content2
-`)
+`,
+    )
     const config = defineConfig({ vaultPath: tmpDir })
     const entries = await readLogbook('@planner', config)
     expect(entries).toHaveLength(2)
@@ -493,10 +517,14 @@ describe('appendLogbook', () => {
   it('creates file if it does not exist', async () => {
     const config = defineConfig({ vaultPath: tmpDir })
     mkdirSync(join(tmpDir, '60_Agents/2_Logbooks'), { recursive: true })
-    await appendLogbook('@newagent', {
-      projectName: 'TestProject',
-      content: 'Test output',
-    }, config)
+    await appendLogbook(
+      '@newagent',
+      {
+        projectName: 'TestProject',
+        content: 'Test output',
+      },
+      config,
+    )
     const entries = await readLogbook('@newagent', config)
     expect(entries).toHaveLength(1)
     expect(entries[0]!.projectName).toBe('TestProject')
@@ -517,20 +545,87 @@ describe('appendLogbook', () => {
 describe('sortByPriority', () => {
   it('orders high → medium → low', () => {
     const projects: VaultProject[] = [
-      { id: 'L', tipo: '*', name: 'L', filePath: '', priority: 'low', runEvery: 'never', runsTotal: 0, tasks: [], hasTasksFolder: false, hasAssetsFolder: false, content: '', raw: {} },
-      { id: 'H', tipo: '*', name: 'H', filePath: '', priority: 'high', runEvery: 'never', runsTotal: 0, tasks: [], hasTasksFolder: false, hasAssetsFolder: false, content: '', raw: {} },
-      { id: 'M', tipo: '*', name: 'M', filePath: '', priority: 'medium', runEvery: 'never', runsTotal: 0, tasks: [], hasTasksFolder: false, hasAssetsFolder: false, content: '', raw: {} },
+      {
+        id: 'L',
+        tipo: '*',
+        name: 'L',
+        filePath: '',
+        priority: 'low',
+        runEvery: 'never',
+        runsTotal: 0,
+        tasks: [],
+        hasTasksFolder: false,
+        hasAssetsFolder: false,
+        content: '',
+        raw: {},
+      },
+      {
+        id: 'H',
+        tipo: '*',
+        name: 'H',
+        filePath: '',
+        priority: 'high',
+        runEvery: 'never',
+        runsTotal: 0,
+        tasks: [],
+        hasTasksFolder: false,
+        hasAssetsFolder: false,
+        content: '',
+        raw: {},
+      },
+      {
+        id: 'M',
+        tipo: '*',
+        name: 'M',
+        filePath: '',
+        priority: 'medium',
+        runEvery: 'never',
+        runsTotal: 0,
+        tasks: [],
+        hasTasksFolder: false,
+        hasAssetsFolder: false,
+        content: '',
+        raw: {},
+      },
     ]
     const sorted = sortByPriority(projects)
-    expect(sorted.map(p => p.priority)).toEqual(['high', 'medium', 'low'])
+    expect(sorted.map((p) => p.priority)).toEqual(['high', 'medium', 'low'])
   })
 })
 
 describe('filterByAgent', () => {
   it('filters correctly by agent string', () => {
     const projects: VaultProject[] = [
-      { id: 'A', tipo: '*', name: 'A', filePath: '', priority: 'medium', agent: '@planner', runEvery: 'never', runsTotal: 0, tasks: [], hasTasksFolder: false, hasAssetsFolder: false, content: '', raw: {} },
-      { id: 'B', tipo: '*', name: 'B', filePath: '', priority: 'medium', agent: '@study-assistant', runEvery: 'never', runsTotal: 0, tasks: [], hasTasksFolder: false, hasAssetsFolder: false, content: '', raw: {} },
+      {
+        id: 'A',
+        tipo: '*',
+        name: 'A',
+        filePath: '',
+        priority: 'medium',
+        agent: '@planner',
+        runEvery: 'never',
+        runsTotal: 0,
+        tasks: [],
+        hasTasksFolder: false,
+        hasAssetsFolder: false,
+        content: '',
+        raw: {},
+      },
+      {
+        id: 'B',
+        tipo: '*',
+        name: 'B',
+        filePath: '',
+        priority: 'medium',
+        agent: '@study-assistant',
+        runEvery: 'never',
+        runsTotal: 0,
+        tasks: [],
+        hasTasksFolder: false,
+        hasAssetsFolder: false,
+        content: '',
+        raw: {},
+      },
     ]
     const filtered = filterByAgent(projects, '@planner')
     expect(filtered).toHaveLength(1)
@@ -541,17 +636,50 @@ describe('filterByAgent', () => {
 describe('getPendingTasks', () => {
   it('returns only non-concluida tasks', () => {
     const p: VaultProject = {
-      id: 'P', tipo: '*', name: 'P', filePath: '', priority: 'medium', runEvery: 'never', runsTotal: 0,
-      hasTasksFolder: true, hasAssetsFolder: false, content: '', raw: {},
+      id: 'P',
+      tipo: '*',
+      name: 'P',
+      filePath: '',
+      priority: 'medium',
+      runEvery: 'never',
+      runsTotal: 0,
+      hasTasksFolder: true,
+      hasAssetsFolder: false,
+      content: '',
+      raw: {},
       tasks: [
-        { id: 't1', filePath: '', title: 'T1', progresso: 0, prioridade: 'medium', state: 'tarefinha', raw: {} },
-        { id: 't2', filePath: '', title: 'T2', progresso: 100, prioridade: 'medium', state: 'concluida', raw: {} },
-        { id: 't3', filePath: '', title: 'T3', progresso: 50, prioridade: 'medium', state: 'em-progresso', raw: {} },
+        {
+          id: 't1',
+          filePath: '',
+          title: 'T1',
+          progresso: 0,
+          prioridade: 'medium',
+          state: 'tarefinha',
+          raw: {},
+        },
+        {
+          id: 't2',
+          filePath: '',
+          title: 'T2',
+          progresso: 100,
+          prioridade: 'medium',
+          state: 'concluida',
+          raw: {},
+        },
+        {
+          id: 't3',
+          filePath: '',
+          title: 'T3',
+          progresso: 50,
+          prioridade: 'medium',
+          state: 'em-progresso',
+          raw: {},
+        },
       ],
     }
     const pending = getPendingTasks(p)
     expect(pending).toHaveLength(2)
-    expect(pending.every(t => t.state !== 'concluida')).toBe(true)
+    expect(pending.every((t) => t.state !== 'concluida')).toBe(true)
   })
 })
 
@@ -560,22 +688,29 @@ describe('getPendingTasks', () => {
 describe('scanVault (end-to-end fixture)', () => {
   it('returns correct VaultState with all project types and agents', async () => {
     // USP project
-    write('10_Projects/PSI9999/PSI9999.md',
-      '---\nid: PSI9999\nagent: "@study-assistant"\npriority: high\nrun_every: daily\n---\n# PSI9999')
-    write('10_Projects/PSI9999/tasks/t1.md',
-      '---\nprogresso: 0%\nprioridade: alta\n---\n# Task 1')
+    write(
+      '10_Projects/PSI9999/PSI9999.md',
+      '---\nid: PSI9999\nagent: "@study-assistant"\npriority: high\nrun_every: daily\n---\n# PSI9999',
+    )
+    write('10_Projects/PSI9999/tasks/t1.md', '---\nprogresso: 0%\nprioridade: alta\n---\n# Task 1')
 
     // BB project (loose file)
-    write('10_Projects/BB-Work.md',
-      '---\nid: BB-Work\ntype: work\nagent: "@planner"\npriority: medium\n---\n# BB Work')
+    write(
+      '10_Projects/BB-Work.md',
+      '---\nid: BB-Work\ntype: work\nagent: "@planner"\npriority: medium\n---\n# BB Work',
+    )
 
     // Meta project
-    write('10_Projects/mytool/mytool.md',
-      '---\nid: mytool\ntype: dev\nagent: "@planner"\npriority: low\n---\n# mytool')
+    write(
+      '10_Projects/mytool/mytool.md',
+      '---\nid: mytool\ntype: dev\nagent: "@planner"\npriority: low\n---\n# mytool',
+    )
 
     // Agent
-    write('60_Agents/1_Directives/planner/directives.md',
-      '---\nname: "@planner"\nrunner: claude\n---\nPlan work.')
+    write(
+      '60_Agents/1_Directives/planner/directives.md',
+      '---\nname: "@planner"\nrunner: claude\n---\nPlan work.',
+    )
 
     const { scanVault } = await import('../src/vault/index.js')
     const config = defineConfig({ vaultPath: tmpDir })
@@ -584,15 +719,15 @@ describe('scanVault (end-to-end fixture)', () => {
     expect(state.projects).toHaveLength(3)
     expect(state.agents).toHaveLength(1)
 
-    const usp = state.projects.find(p => p.id === 'PSI9999')!
+    const usp = state.projects.find((p) => p.id === 'PSI9999')!
     expect(usp.tipo).toBe('USP')
     expect(usp.tasks).toHaveLength(1)
 
-    const bb = state.projects.find(p => p.id === 'BB-Work')!
+    const bb = state.projects.find((p) => p.id === 'BB-Work')!
     expect(bb.tipo).toBe('BB')
     expect(bb.folderPath).toBeUndefined()
 
-    const meta = state.projects.find(p => p.id === 'mytool')!
+    const meta = state.projects.find((p) => p.id === 'mytool')!
     expect(meta.tipo).toBe('*')
   })
 })
@@ -601,8 +736,10 @@ describe('scanVault (end-to-end fixture)', () => {
 
 describe('updateProjectStatus', () => {
   it('writes _last_run, _last_status and _runs_total into the file', async () => {
-    const filePath = write('10_Projects/PROJ/PROJ.md',
-      '---\nid: PROJ\nagent: "@study-assistant"\nrun_every: daily\n---\n# Content\n')
+    const filePath = write(
+      '10_Projects/PROJ/PROJ.md',
+      '---\nid: PROJ\nagent: "@study-assistant"\nrun_every: daily\n---\n# Content\n',
+    )
 
     await updateProjectStatus(filePath, {
       lastRun: '2026-05-20T14:00:00.000Z',
@@ -618,8 +755,10 @@ describe('updateProjectStatus', () => {
   })
 
   it('preserves existing frontmatter fields', async () => {
-    const filePath = write('10_Projects/PROJ2/PROJ2.md',
-      '---\nid: PROJ2\npriority: high\nagent: "@planner"\n---\n# Body\n')
+    const filePath = write(
+      '10_Projects/PROJ2/PROJ2.md',
+      '---\nid: PROJ2\npriority: high\nagent: "@planner"\n---\n# Body\n',
+    )
 
     await updateProjectStatus(filePath, {
       lastRun: '2026-05-20T15:00:00.000Z',
@@ -638,8 +777,7 @@ describe('updateProjectStatus', () => {
   })
 
   it('increments runs_total on successive calls', async () => {
-    const filePath = write('10_Projects/PROJ3/PROJ3.md',
-      '---\nid: PROJ3\n_runs_total: 5\n---\n')
+    const filePath = write('10_Projects/PROJ3/PROJ3.md', '---\nid: PROJ3\n_runs_total: 5\n---\n')
 
     await updateProjectStatus(filePath, {
       lastRun: new Date().toISOString(),

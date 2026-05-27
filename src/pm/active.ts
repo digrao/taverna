@@ -1,4 +1,11 @@
-import { writeFileSync, unlinkSync, readdirSync, readFileSync, mkdirSync, existsSync } from 'node:fs'
+import {
+  writeFileSync,
+  unlinkSync,
+  readdirSync,
+  readFileSync,
+  mkdirSync,
+  existsSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -9,6 +16,7 @@ export interface ActiveRun {
   agent: string
   sessionId: string
   startedAt: string
+  tmuxSession?: string
 }
 
 function ensureDir(): void {
@@ -21,15 +29,23 @@ export function markActive(run: ActiveRun): void {
 }
 
 export function markInactive(project: string): void {
-  try { unlinkSync(join(DIR, `${project}.json`)) } catch { /* already gone */ }
+  try {
+    unlinkSync(join(DIR, `${project}.json`))
+  } catch {
+    /* already gone */
+  }
 }
 
 export function getActiveRuns(): ActiveRun[] {
   ensureDir()
   return readdirSync(DIR)
-    .filter(f => f.endsWith('.json'))
-    .flatMap(f => {
-      try { return [JSON.parse(readFileSync(join(DIR, f), 'utf8')) as ActiveRun] } catch { return [] }
+    .filter((f) => f.endsWith('.json'))
+    .flatMap((f) => {
+      try {
+        return [JSON.parse(readFileSync(join(DIR, f), 'utf8')) as ActiveRun]
+      } catch {
+        return []
+      }
     })
 }
 

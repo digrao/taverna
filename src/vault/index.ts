@@ -2,11 +2,17 @@ import { join } from 'node:path'
 import { writeFile, mkdir } from 'node:fs/promises'
 import { scanProjects } from './project.js'
 import { discoverAgents } from './agent.js'
-import type { VaultProject, VaultAgent, VaultState, VaultTask, Priority } from './types.js'
+import type { VaultProject, VaultState, VaultTask, Priority } from './types.js'
 import type { TavernaConfig } from '../config.js'
 
 export { readProject, scanProjects, detectProjectType } from './project.js'
-export { readProjectTasks, progressToState, isBlocked, hasCycle, resolveDependency } from './task.js'
+export {
+  readProjectTasks,
+  progressToState,
+  isBlocked,
+  hasCycle,
+  resolveDependency,
+} from './task.js'
 export type { BlockedInfo } from './task.js'
 export { readAgent, discoverAgents } from './agent.js'
 export { readLogbook, appendLogbook, appendProjectLogbook } from './logbook.js'
@@ -39,11 +45,11 @@ export function sortByPriority(projects: VaultProject[]): VaultProject[] {
 }
 
 export function filterByAgent(projects: VaultProject[], agentId: string): VaultProject[] {
-  return projects.filter(p => p.agent === agentId)
+  return projects.filter((p) => p.agent === agentId)
 }
 
 export function getPendingTasks(project: VaultProject): VaultTask[] {
-  return project.tasks.filter(t => t.state !== 'concluida')
+  return project.tasks.filter((t) => t.state !== 'concluida')
 }
 
 export async function writeInbox(

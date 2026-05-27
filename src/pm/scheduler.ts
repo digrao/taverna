@@ -4,6 +4,9 @@ import { scanVault, appendLogbook } from '../vault/index.js'
 import { updateProjectStatus } from '../vault/update.js'
 import { runAgent } from './executor.js'
 import { getString } from '../vault/frontmatter.js'
+import { isRunWindowOpen } from './run-window.js'
+import { deferred } from './loki.js'
+import { rankProjects } from './scorer.js'
 
 export type ComposeMode = 'inherit' | 'override'
 
@@ -27,15 +30,19 @@ export interface ProjectPolicy {
 
 export interface SchedulerOptions {
   dryRun?: boolean
-  tickMs?: number    // default: 60_000
-  maxTicks?: number  // stop after N ticks (useful for testing / one-shot)
+  tickMs?: number // default: 60_000
+  maxTicks?: number // stop after N ticks (useful for testing / one-shot)
   onTick?: (now: Date) => void
+  /** Max projects to run per tick (default: unlimited) */
+  runBatchSize?: number
+  /** Max concurrent runs per agent id within a tick, e.g. { '@study-assistant': 1 } */
+  maxConcurrentPerAgent?: Record<string, number>
 }
 
 const FREQ_MS: Record<string, number> = {
-  hourly:  3_600_000,
-  daily:   86_400_000,
-  weekly:  604_800_000,
+  hourly: 3_600_000,
+  daily: 86_400_000,
+  weekly: 604_800_000,
   monthly: 2_592_000_000,
 }
 
@@ -62,10 +69,7 @@ export function readProjectPolicy(raw: RawFrontmatter): ProjectPolicy | undefine
   return { compose, steps }
 }
 
-export function mergePolicy(
-  typeSteps: PolicyStep[],
-  projectPolicy?: ProjectPolicy,
-): PolicyStep[] {
+export function mergePolicy(typeSteps: PolicyStep[], projectPolicy?: ProjectPolicy): PolicyStep[] {
   if (!projectPolicy) return typeSteps
   if (projectPolicy.compose === 'override') return projectPolicy.steps
   return [...typeSteps, ...projectPolicy.steps]
@@ -88,7 +92,7 @@ export function isProjectDue(project: VaultProject, now: Date): boolean {
 }
 
 export function getTypePolicy(tipo: ProjectType, typePolicies: TypePolicy[]): PolicyStep[] {
-  return typePolicies.find(p => p.tipo === tipo)?.steps ?? []
+  return typePolicies.find((p) => p.tipo === tipo)?.steps ?? []
 }
 
 export async function runScheduler(
@@ -100,31 +104,81 @@ export async function runScheduler(
   const maxTicks = opts.maxTicks ?? Infinity
   let ticks = 0
 
+  const maxConcurrentPerAgent = opts.maxConcurrentPerAgent ?? {}
+  const runBatchSize = opts.runBatchSize ?? Infinity
+
   while (ticks < maxTicks) {
     const now = new Date()
     const vault = await scanVault(config)
 
+    // Collect and filter eligible projects, then rank by score
+    const eligible: VaultProject[] = []
     for (const project of vault.projects) {
       if (!isProjectDue(project, now)) continue
+
+      const runWindow =
+        typeof project.raw['run_window'] === 'string'
+          ? project.raw['run_window']
+          : (config.defaultRunWindow ?? 'always')
+      const windowResult = await isRunWindowOpen(runWindow, now, config.idleThresholdMinutes)
+      if (!windowResult.open) {
+        deferred({
+          project: project.id,
+          reason: windowResult.reason ?? 'run_window',
+          ...(windowResult.nextEligibleAt != null
+            ? { next_eligible_at: windowResult.nextEligibleAt }
+            : {}),
+        })
+        continue
+      }
 
       const typeSteps = getTypePolicy(project.tipo, typePolicies)
       const projectPolicy = readProjectPolicy(project.raw)
       const steps = mergePolicy(typeSteps, projectPolicy)
-      const eligibleSteps = steps.filter(s => isAtSatisfied(s.at, now))
+      if (steps.filter((s) => isAtSatisfied(s.at, now)).length === 0) continue
 
-      if (eligibleSteps.length === 0) continue
+      eligible.push(project)
+    }
+
+    // Rank eligible projects by score (deadline urgency, health, staleness, etc.)
+    const ranked = rankProjects(eligible, config.agentDefaults, { now })
+
+    // Run in priority order, honouring batch size and per-agent concurrency limits
+    const agentRunCount: Record<string, number> = {}
+    let batchCount = 0
+
+    for (const { project, agentId } of ranked) {
+      if (batchCount >= runBatchSize) break
+
+      const limit = maxConcurrentPerAgent[agentId]
+      if (limit !== undefined && (agentRunCount[agentId] ?? 0) >= limit) {
+        if (opts.dryRun) {
+          console.log(`[dry-run] ${project.id} → ${agentId} SKIPPED (agent limit ${limit} reached)`)
+        }
+        continue
+      }
+
+      const typeSteps = getTypePolicy(project.tipo, typePolicies)
+      const projectPolicy = readProjectPolicy(project.raw)
+      const steps = mergePolicy(typeSteps, projectPolicy)
+      const eligibleSteps = steps.filter((s) => isAtSatisfied(s.at, now))
 
       if (opts.dryRun) {
         for (const step of eligibleSteps) {
-          console.log(`[dry-run] ${project.id} (${project.tipo}) → ${step.agent}${step.at ? ` at ${step.at}` : ''}`)
+          console.log(
+            `[dry-run] ${project.id} (${project.tipo}) → ${step.agent}${step.at ? ` at ${step.at}` : ''}`,
+          )
         }
+        agentRunCount[agentId] = (agentRunCount[agentId] ?? 0) + 1
+        batchCount++
         continue
       }
 
       let anySuccess = false
       for (const step of eligibleSteps) {
         const agent = vault.agents.find(
-          a => a.id === step.agent || a.folderName === step.agent || `@${a.folderName}` === step.agent,
+          (a) =>
+            a.id === step.agent || a.folderName === step.agent || `@${a.folderName}` === step.agent,
         )
         if (!agent) {
           console.error(`  skip ${project.id}: agent ${step.agent} not found`)
@@ -134,17 +188,21 @@ export async function runScheduler(
         const result = await runAgent(agent, project, { vaultPath: config.vaultPath })
         anySuccess = anySuccess || result.success
 
-        await appendLogbook(agent.id, {
-          projectName: project.id,
-          content: [
-            `**Success:** ${result.success}`,
-            `**Duration:** ${(result.durationMs / 1000).toFixed(1)}s`,
-            ...(result.resultado ? [`**Resultado:** ${result.resultado}`] : []),
-            ...(result.error ? [`**Error:** ${result.error}`] : []),
-          ].join('\n'),
-          success: result.success,
-          duration: result.durationMs / 1000,
-        }, config)
+        await appendLogbook(
+          agent.id,
+          {
+            projectName: project.id,
+            content: [
+              `**Success:** ${result.success}`,
+              `**Duration:** ${(result.durationMs / 1000).toFixed(1)}s`,
+              ...(result.resultado ? [`**Resultado:** ${result.resultado}`] : []),
+              ...(result.error ? [`**Error:** ${result.error}`] : []),
+            ].join('\n'),
+            success: result.success,
+            duration: result.durationMs / 1000,
+          },
+          config,
+        )
       }
 
       await updateProjectStatus(project.filePath, {
@@ -152,13 +210,16 @@ export async function runScheduler(
         lastStatus: anySuccess ? 'success' : 'failed',
         runsTotal: project.runsTotal + eligibleSteps.length,
       })
+
+      agentRunCount[agentId] = (agentRunCount[agentId] ?? 0) + 1
+      batchCount++
     }
 
     ticks++
     opts.onTick?.(now)
 
     if (ticks < maxTicks) {
-      await new Promise<void>(resolve => setTimeout(resolve, tickMs))
+      await new Promise<void>((resolve) => setTimeout(resolve, tickMs))
     }
   }
 }
