@@ -17,8 +17,13 @@ async function get(path: string): Promise<unknown> {
   return res.json()
 }
 
-async function post(path: string): Promise<unknown> {
-  const res = await fetch(`${BASE}${path}`, { method: 'POST' })
+async function post(path: string, body?: unknown): Promise<unknown> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    ...(body !== undefined
+      ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+      : {}),
+  })
   if (!res.ok) throw new Error(`POST ${path} → ${res.status} ${res.statusText}`)
   return res.json()
 }
@@ -110,6 +115,34 @@ server.tool(
   async ({ id }) => ok(await post(`/api/run/${id}`)),
 )
 
+// ── Session tools ──────────────────────────────────────────────────────────────
+
+server.tool(
+  'taverna_session_preview',
+  'Show eligible unblocked tasks grouped by project for batched session execution',
+  { project: z.string().optional().describe('Filter to a specific project ID') },
+  async ({ project }) => {
+    const path = project
+      ? `/api/session/preview?project=${encodeURIComponent(project)}`
+      : '/api/session/preview'
+    return ok(await get(path))
+  },
+)
+
+server.tool(
+  'taverna_session_run',
+  'Launch a batched agent session for a project — all eligible tasks run in one context window to maximise cache reuse',
+  {
+    project: z.string().describe('Project ID (e.g. taverna, PSI3451)'),
+    tasks: z
+      .string()
+      .optional()
+      .describe('Comma-separated task IDs to include (default: all unblocked pending)'),
+  },
+  async ({ project, tasks }) =>
+    ok(await post('/api/session/run', { project, ...(tasks ? { tasks } : {}) })),
+)
+
 // ── Scaffold tools ─────────────────────────────────────────────────────────────
 
 const VAULT_PATH = process.env['VAULT_PATH'] ?? ''
@@ -180,6 +213,24 @@ server.tool(
 )
 
 // ── e-Disciplinas tools ────────────────────────────────────────────────────────
+
+server.tool(
+  'taverna_sync_all',
+  'Sync all e-Disciplinas registries for every discipline that has a .edisciplinas.json registry',
+  {},
+  async () => ok(await post('/api/edisciplinas/sync')),
+)
+
+server.tool(
+  'taverna_mark_processed',
+  'Mark an e-Disciplinas material as processed by discipline ID and URL hash',
+  {
+    id: z.string().describe('Discipline ID (e.g. PSI3451)'),
+    hash: z.string().describe('URL hash of the item to mark as processed (url_hash field)'),
+  },
+  async ({ id, hash }) =>
+    ok(await post(`/api/edisciplinas/mark/${encodeURIComponent(id)}/${encodeURIComponent(hash)}`)),
+)
 
 server.tool(
   'taverna_sync_assets',

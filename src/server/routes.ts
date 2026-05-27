@@ -13,6 +13,8 @@ import { computeHealth } from '../pm/loki.js'
 import { getActiveRuns, activeDir } from '../pm/active.js'
 import { renderDashboard } from './dashboard.js'
 import { renderFlow } from './flow.js'
+import { syncAllRegistries, listUnprocessed, markProcessed } from '../edisciplinas/registry.js'
+import { startEdisciplinasWatcher } from '../edisciplinas/watcher.js'
 
 type SSEClient = ServerResponse
 
@@ -41,6 +43,18 @@ export class Router {
     } catch {
       /* non-fatal if watch fails */
     }
+
+    // Watch ~/Downloads/_edisciplinas_metadata.json and broadcast edisciplinas:synced
+    startEdisciplinasWatcher(config.vaultPath, (disciplineId) => {
+      const msg = `event: edisciplinas:synced\ndata: ${JSON.stringify({ disciplineId })}\n\n`
+      for (const client of this.sseClients) {
+        try {
+          client.write(msg)
+        } catch {
+          this.sseClients.delete(client)
+        }
+      }
+    })
   }
 
   private json(res: ServerResponse, data: unknown, status = 200): void {
@@ -78,6 +92,19 @@ export class Router {
     if (method === 'POST' && path === '/api/drain') return this.handleRun(req, res, ['--drain'])
     if (method === 'POST' && path.startsWith('/api/run/')) {
       return this.handleRun(req, res, ['--project', decodeURIComponent(path.slice(9))])
+    }
+    if (method === 'GET' && path === '/api/session/preview')
+      return this.handleSessionPreview(req, res, url)
+    if (method === 'POST' && path === '/api/session/run') return this.handleSessionRun(req, res)
+    if (path === '/api/edisciplinas/unprocessed')
+      return this.handleEdisciplinasUnprocessed(req, res)
+    if (method === 'POST' && path === '/api/edisciplinas/sync')
+      return this.handleEdisciplinasSync(req, res)
+    if (method === 'POST' && path.startsWith('/api/edisciplinas/mark/')) {
+      const parts = path.slice('/api/edisciplinas/mark/'.length).split('/')
+      const discipline = decodeURIComponent(parts[0] ?? '')
+      const hash = decodeURIComponent(parts[1] ?? '')
+      return this.handleEdisciplinasMark(req, res, discipline, hash)
     }
     if (path === '/status') return this.handleStatus(req, res)
     if (path === '/projects') return this.handleProjects(req, res)
@@ -212,6 +239,109 @@ export class Router {
       : undefined
     const label = project ? `projeto ${project}` : drain ? 'drain' : 'execute'
     this.json(res, { started: true, message: `taverna ${label} iniciado` })
+  }
+
+  private async handleEdisciplinasUnprocessed(
+    _req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> {
+    const state = await this.cache.get()
+    const uspProjects = state.projects.filter((p) => p.tipo === 'USP')
+    const result: Record<string, unknown> = {}
+    for (const p of uspProjects) {
+      const items = await listUnprocessed(p.id, this.config.vaultPath).catch(() => [])
+      if (items.length > 0) result[p.id] = items
+    }
+    this.json(res, result)
+  }
+
+  private async handleEdisciplinasSync(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const stats = await syncAllRegistries(this.config.vaultPath)
+    this.json(res, { synced: true, stats })
+  }
+
+  private async handleEdisciplinasMark(
+    _req: IncomingMessage,
+    res: ServerResponse,
+    discipline: string,
+    hash: string,
+  ): Promise<void> {
+    if (!discipline || !hash) {
+      return this.json(res, { error: 'discipline and hash required' }, 400)
+    }
+    const marked = await markProcessed(discipline, hash, this.config.vaultPath)
+    this.json(res, { marked, discipline, hash })
+  }
+
+  private readBody(req: IncomingMessage): Promise<unknown> {
+    return new Promise((resolve) => {
+      let buf = ''
+      req.on('data', (chunk: Buffer) => {
+        buf += chunk.toString()
+      })
+      req.on('end', () => {
+        try {
+          resolve(JSON.parse(buf))
+        } catch {
+          resolve({})
+        }
+      })
+    })
+  }
+
+  private async handleSessionPreview(
+    _req: IncomingMessage,
+    res: ServerResponse,
+    url: URL,
+  ): Promise<void> {
+    const { isBlocked } = await import('../vault/task.js')
+    const state = await this.cache.get()
+    const filterProject = url.searchParams.get('project')
+    const projects = filterProject
+      ? state.projects.filter((p) => p.id === filterProject || p.name === filterProject)
+      : state.projects
+
+    const result = projects
+      .map((p) => ({
+        project: p.id,
+        agent: p.agent ?? '',
+        tasks: p.tasks
+          .filter((t) => t.progresso < 100)
+          .filter((t) => !isBlocked(t, p.tasks).blocked)
+          .map((t) => ({
+            id: t.id,
+            title: t.title,
+            progresso: t.progresso,
+            prioridade: t.prioridade,
+          })),
+      }))
+      .filter((p) => p.tasks.length > 0)
+
+    this.json(res, {
+      projects: result,
+      total: result.reduce((s, p) => s + p.tasks.length, 0),
+    })
+  }
+
+  private async handleSessionRun(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = (await this.readBody(req)) as { project?: string; tasks?: string }
+    const project = body.project
+    if (!project) return this.json(res, { error: 'project required' }, 400)
+
+    const args = ['session', 'run', '--project', project]
+    if (body.tasks) args.push('--tasks', body.tasks)
+
+    const cmd = ['taverna', ...args].map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ')
+    const proc = spawn('sh', ['-c', `${cmd} 2>&1 | systemd-cat --identifier=taverna-executor`], {
+      stdio: 'ignore',
+      detached: true,
+      env: { ...process.env },
+    })
+    proc.unref()
+    this.json(res, {
+      started: true,
+      message: `taverna session run iniciado para projeto ${project}`,
+    })
   }
 
   private async handleInbox(_req: IncomingMessage, res: ServerResponse): Promise<void> {
