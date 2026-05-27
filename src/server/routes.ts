@@ -13,9 +13,6 @@ import { computeHealth } from '../pm/loki.js'
 import { getActiveRuns, activeDir } from '../pm/active.js'
 import { renderDashboard } from './dashboard.js'
 import { renderFlow } from './flow.js'
-import { renderSlides } from './slides.js'
-import { renderInfra } from './infra.js'
-import { renderIshine } from './ishine.js'
 
 type SSEClient = ServerResponse
 
@@ -73,9 +70,6 @@ export class Router {
 
     if (path === '/dashboard') return this.handleDashboard(req, res)
     if (path === '/flow') return this.handleFlow(req, res)
-    if (path === '/slides') return this.handleSlides(req, res)
-    if (path === '/ishine') return this.handleIshine(req, res)
-    if (path === '/infraestrutura') return this.handleInfra(req, res)
     if (path === '/api/active') return this.handleApiActive(req, res)
     if (path === '/api/state') return this.handleApiState(req, res)
     if (path === '/api/costs') return this.handleApiCosts(req, res)
@@ -176,21 +170,6 @@ export class Router {
     const html = renderFlow(state.projects)
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
     res.end(html)
-  }
-
-  private handleSlides(_req: IncomingMessage, res: ServerResponse): void {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-    res.end(renderSlides())
-  }
-
-  private handleIshine(_req: IncomingMessage, res: ServerResponse): void {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-    res.end(renderIshine())
-  }
-
-  private handleInfra(_req: IncomingMessage, res: ServerResponse): void {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-    res.end(renderInfra())
   }
 
   private async handleApiState(_req: IncomingMessage, res: ServerResponse): Promise<void> {
