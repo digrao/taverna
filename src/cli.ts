@@ -1677,6 +1677,53 @@ blogCmd
     console.log()
   })
 
+// ── policies-ci ────────────────────────────────────────────────────────────────
+
+program
+  .command('policies-ci [project-id]')
+  .description('Show effective CI/CD build policies (from ~/tools/policies.yaml)')
+  .option('--dry-run', 'Show resolved policies without executing anything')
+  .action(async (projectId: string | undefined) => {
+    try {
+      const { PolicyResolver } = await import('./pm/policy.js')
+
+      const resolver = new PolicyResolver()
+
+      if (projectId) {
+        // Show policy for specific project
+        const policy = resolver.getProjectPolicy(projectId)
+        console.log(`\nProject Policy: ${projectId}`)
+        console.log('─'.repeat(60))
+        console.log(`Description: ${policy.description}`)
+        console.log(`Build Type: ${policy.build_type}`)
+        console.log(`Test Enabled: ${policy.test_enabled}`)
+        console.log(`Deploy Enabled: ${policy.deploy_enabled}`)
+        if (policy.deploy_env) console.log(`Deploy Environment: ${policy.deploy_env}`)
+        if (policy.service_name) console.log(`Service Name: ${policy.service_name}`)
+        console.log(`Auto Trigger: ${policy.auto_trigger}`)
+        if (policy.dependencies.length > 0) {
+          console.log(`Dependencies: ${policy.dependencies.join(', ')}`)
+        }
+        if (policy.pre_deploy.length > 0) {
+          console.log(`Pre-Deploy Hooks: ${policy.pre_deploy.length}`)
+          policy.pre_deploy.forEach((hook) => console.log(`  - ${hook}`))
+        }
+        if (policy.post_deploy.length > 0) {
+          console.log(`Post-Deploy Hooks: ${policy.post_deploy.length}`)
+          policy.post_deploy.forEach((hook) => console.log(`  - ${hook}`))
+        }
+      } else {
+        // Show all policies
+        console.log(resolver.formatPolicyReport())
+      }
+    } catch (error) {
+      console.error(
+        `Error reading policies: ${error instanceof Error ? error.message : String(error)}`,
+      )
+      process.exit(1)
+    }
+  })
+
 // ── mcp ───────────────────────────────────────────────────────────────────────
 
 program
