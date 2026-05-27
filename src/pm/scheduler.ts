@@ -7,6 +7,7 @@ import { getString } from '../vault/frontmatter.js'
 import { isRunWindowOpen } from './run-window.js'
 import { deferred } from './loki.js'
 import { rankProjects } from './scorer.js'
+import { confirmProjectSelection } from './matrix-confirm.js'
 
 export type ComposeMode = 'inherit' | 'override'
 
@@ -143,11 +144,14 @@ export async function runScheduler(
     // Rank eligible projects by score (deadline urgency, health, staleness, etc.)
     const ranked = rankProjects(eligible, config.agentDefaults, { now })
 
+    // Optional Matrix confirmation — skipped in dry-run and when Matrix is not configured
+    const toRun = opts.dryRun ? ranked : await confirmProjectSelection(ranked, now)
+
     // Run in priority order, honouring batch size and per-agent concurrency limits
     const agentRunCount: Record<string, number> = {}
     let batchCount = 0
 
-    for (const { project, agentId } of ranked) {
+    for (const { project, agentId } of toRun) {
       if (batchCount >= runBatchSize) break
 
       const limit = maxConcurrentPerAgent[agentId]

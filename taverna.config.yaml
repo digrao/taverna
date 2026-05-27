@@ -1,3 +1,9 @@
 budget:
-  global_tokens_daily: 10000000  # temporário: aumentado para 2026-05-26 (sessão longa)
+  global_tokens_daily: 2000000 
   warn_at_pct: 75
+
+# Matrix pre-execution confirmation (requires MATRIX_HOMESERVER, MATRIX_ROOM_ID, MATRIX_ACCESS_TOKEN)
+# matrix:
+#   timeout_min: 5
+#   on_timeout: run_all   # run_all | skip
+#   poll_interval_ms: 5000
