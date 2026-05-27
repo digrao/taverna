@@ -1642,6 +1642,41 @@ program
     console.log()
   })
 
+// ── blog ──────────────────────────────────────────────────────────────────────
+
+const blogCmd = program.command('blog').description('Blog post deployment tools')
+
+blogCmd
+  .command('deploy')
+  .description('Deploy vault posts (20_Areas/8_Posts/) to the blog project directory')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .option('--blog-dir <path>', 'Blog project directory (default: ~/Projetos/blog)')
+  .option('--dry-run', 'Show what would be deployed without writing files')
+  .action(async (opts: { vault?: string; blogDir?: string; dryRun?: boolean }) => {
+    const { deployPosts, defaultBlogDir } = await import('./blog/index.js')
+    const vaultPath = getVaultPath(opts)
+    const blogDir = opts.blogDir ?? defaultBlogDir()
+
+    const result = await deployPosts(vaultPath, {
+      blogDir,
+      ...(opts.dryRun !== undefined ? { dryRun: opts.dryRun } : {}),
+    })
+
+    if (opts.dryRun) {
+      console.log(`\nDry run — blog dir: ${blogDir}`)
+    }
+    for (const f of result.deployed) {
+      console.log(`  ${opts.dryRun ? '(would deploy)' : 'deployed'} ${f}`)
+    }
+    for (const { file, error } of result.errors) {
+      console.error(`  error ${file}: ${error}`)
+    }
+    if (result.deployed.length === 0 && result.errors.length === 0) {
+      console.log('  No posts found in 20_Areas/8_Posts/')
+    }
+    console.log()
+  })
+
 // ── mcp ───────────────────────────────────────────────────────────────────────
 
 program
