@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFile, writeFile, mkdir, stat, readdir } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import { homedir } from 'node:os'
+import { parseFrontmatter } from '../vault/frontmatter.js'
 
 export interface RegistryItem {
   url_hash: string
@@ -43,6 +44,8 @@ interface MetaItem {
 }
 
 interface Metadata {
+  course_url?: string
+  discipline_id?: string
   items: MetaItem[]
 }
 
@@ -205,6 +208,95 @@ export async function syncAssets(
   registry.items = newItems
   await saveRegistry(projectDir, registry)
   return stats
+}
+
+export async function markProcessed(
+  disciplineId: string,
+  urlHash: string,
+  vaultPath: string,
+): Promise<boolean> {
+  const projectDir = await findProjectDir(vaultPath, disciplineId)
+  const registry = await loadRegistry(projectDir)
+  const item = registry.items.find((i) => i.url_hash === urlHash)
+  if (!item) return false
+  item.processed = true
+  await saveRegistry(projectDir, registry)
+  return true
+}
+
+export async function resolveDisciplineFromMetadata(
+  metadataPath: string,
+  vaultPath: string,
+): Promise<string | null> {
+  let raw: string
+  try {
+    raw = await readFile(metadataPath, 'utf8')
+  } catch {
+    return null
+  }
+
+  let meta: Metadata
+  try {
+    meta = JSON.parse(raw) as Metadata
+  } catch {
+    return null
+  }
+
+  // Fast path: discipline_id is already embedded in the metadata
+  if (typeof meta.discipline_id === 'string' && /^[A-Z]{3}\d{4}/.test(meta.discipline_id)) {
+    return meta.discipline_id
+  }
+
+  // Slow path: match course_url against vault project frontmatter
+  if (typeof meta.course_url === 'string') {
+    const projectsDir = join(vaultPath, '10_Projects')
+    let entries: string[]
+    try {
+      entries = await readdir(projectsDir)
+    } catch {
+      return null
+    }
+    for (const entry of entries) {
+      const projectFile = join(projectsDir, entry, `${entry}.md`)
+      try {
+        const content = await readFile(projectFile, 'utf8')
+        const { data } = parseFrontmatter(content)
+        const edisciplinas = data['edisciplinas']
+        if (typeof edisciplinas === 'string' && edisciplinas.includes(meta.course_url)) {
+          return entry
+        }
+      } catch {
+        /* skip unreadable projects */
+      }
+    }
+  }
+
+  return null
+}
+
+export async function syncAllRegistries(
+  vaultPath: string,
+  downloadsDir?: string,
+): Promise<Record<string, SyncStats>> {
+  const projectsDir = join(vaultPath, '10_Projects')
+  let entries: string[]
+  try {
+    entries = await readdir(projectsDir)
+  } catch {
+    return {}
+  }
+
+  const results: Record<string, SyncStats> = {}
+  for (const entry of entries) {
+    const registryPath = join(projectsDir, entry, '.edisciplinas.json')
+    try {
+      await stat(registryPath)
+    } catch {
+      continue
+    }
+    results[entry] = await syncAssets(entry, vaultPath, downloadsDir)
+  }
+  return results
 }
 
 export async function listUnprocessed(

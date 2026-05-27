@@ -4,6 +4,8 @@ import { writeInbox } from '../vault/index.js'
 import { updateBoardFile } from '../usp/board.js'
 import type { TavernaConfig } from '../config.js'
 import type { VaultProject, LogbookEntry } from '../vault/types.js'
+import { syncAllRegistries, listUnprocessed } from '../edisciplinas/registry.js'
+import type { SyncStats } from '../edisciplinas/registry.js'
 
 function isYesterday(timestamp: string, today: Date): boolean {
   const d = new Date(timestamp)
@@ -18,7 +20,7 @@ function isYesterday(timestamp: string, today: Date): boolean {
 
 function formatYesterdaySection(agentId: string, entries: LogbookEntry[]): string {
   if (entries.length === 0) return ''
-  const lines = entries.map(e => {
+  const lines = entries.map((e) => {
     const status = e.success === true ? '✓' : e.success === false ? '✗' : '·'
     const dur = e.duration != null ? ` (${e.duration.toFixed(1)}s)` : ''
     return `- ${status} **${e.projectName}**${dur}`
@@ -28,7 +30,8 @@ function formatYesterdaySection(agentId: string, entries: LogbookEntry[]): strin
 
 function formatProjectSection(project: VaultProject): string {
   const pending = getPendingTasks(project)
-  const badge = project.priority === 'high' ? '[HIGH]' : project.priority === 'medium' ? '[MED]' : '[LOW]'
+  const badge =
+    project.priority === 'high' ? '[HIGH]' : project.priority === 'medium' ? '[MED]' : '[LOW]'
   const tipo = project.tipo !== '*' ? ` (${project.tipo})` : ''
   const agent = project.agent ? ` · ${project.agent}` : ''
   let out = `### ${badge} ${project.id}${tipo}${agent}\n`
@@ -44,6 +47,35 @@ function formatProjectSection(project: VaultProject): string {
   return out
 }
 
+async function buildEdisciplinasTable(
+  uspProjects: VaultProject[],
+  vaultPath: string,
+): Promise<string> {
+  const allStats = await syncAllRegistries(vaultPath).catch(() => ({}) as Record<string, SyncStats>)
+
+  const rows: string[] = []
+  for (const p of uspProjects) {
+    const items = await listUnprocessed(p.id, vaultPath).catch(() => [])
+    const stats = allStats[p.id]
+    const newCount = stats?.new ?? 0
+    const pendingCount = items.length
+
+    if (newCount === 0 && pendingCount === 0) continue
+    rows.push(`| ${p.id} | ${newCount} | ${pendingCount} |`)
+  }
+
+  if (rows.length === 0) return ''
+
+  return [
+    '## e-Disciplinas',
+    '',
+    '| Disciplina | Novos | Não processados |',
+    '|------------|-------|-----------------|',
+    ...rows,
+    '',
+  ].join('\n')
+}
+
 export async function morning(
   config: TavernaConfig,
   opts: { dryRun?: boolean; date?: Date } = {},
@@ -55,21 +87,22 @@ export async function morning(
   const yesterdaySections: string[] = []
   for (const agent of state.agents) {
     const entries = await readLogbook(agent.id, config)
-    const yesterday = entries.filter(e => isYesterday(e.timestamp, today))
+    const yesterday = entries.filter((e) => isYesterday(e.timestamp, today))
     const section = formatYesterdaySection(agent.id, yesterday)
     if (section) yesterdaySections.push(section)
   }
 
   // Today's projects sorted by priority
   const sorted = sortByPriority(state.projects)
+  const uspProjects = state.projects.filter((p) => p.tipo === 'USP')
 
   const pad = (n: number) => String(n).padStart(2, '0')
   const dateStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
 
-  const lines: string[] = [
-    `# Morning Brief — ${dateStr}`,
-    '',
-  ]
+  // Build e-Disciplinas table before constructing the markdown
+  const edisciplinasTable = await buildEdisciplinasTable(uspProjects, config.vaultPath)
+
+  const lines: string[] = [`# Morning Brief — ${dateStr}`, '']
 
   if (yesterdaySections.length > 0) {
     lines.push('## Ontem')
@@ -78,6 +111,10 @@ export async function morning(
     lines.push('## Ontem')
     lines.push('_nenhuma execução registrada_')
     lines.push('')
+  }
+
+  if (edisciplinasTable) {
+    lines.push(edisciplinasTable)
   }
 
   lines.push('## Hoje')
@@ -96,9 +133,14 @@ export async function morning(
     await writeInbox(markdown, filename, config)
 
     // Update USP health board in the vault
-    const uspProjects = state.projects.filter(p => p.tipo === 'USP')
+    const uspProjects = state.projects.filter((p) => p.tipo === 'USP')
     if (uspProjects.length > 0) {
-      const boardPath = join(config.vaultPath, '20_Areas', '2_Estudos', 'Escola Politécnica da USP.md')
+      const boardPath = join(
+        config.vaultPath,
+        '20_Areas',
+        '2_Estudos',
+        'Escola Politécnica da USP.md',
+      )
       await updateBoardFile(boardPath, uspProjects)
     }
   }

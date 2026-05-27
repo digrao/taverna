@@ -22,6 +22,7 @@ import {
   formatAgentStartMessage,
 } from './matrix.js'
 import { markActive, markInactive } from './active.js'
+import type { UnprocessedItem } from '../edisciplinas/registry.js'
 
 export interface ExecutorOptions {
   maxContextChars?: number
@@ -543,7 +544,24 @@ export async function runAgent(
     }
   }
 
-  const prompt = await buildPrompt(agent, project, maxContextChars, opts?.previousOutput)
+  // Load e-Disciplinas unprocessed items for USP projects
+  let edisciplinasItems: UnprocessedItem[] | undefined
+  if (project.tipo === 'USP' && vaultPath) {
+    try {
+      const { listUnprocessed } = await import('../edisciplinas/registry.js')
+      edisciplinasItems = await listUnprocessed(project.id, vaultPath)
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  const prompt = await buildPrompt(
+    agent,
+    project,
+    maxContextChars,
+    opts?.previousOutput,
+    edisciplinasItems,
+  )
 
   if (opts?.dryRun) {
     return { success: true, output: prompt, durationMs: 0 }

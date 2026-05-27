@@ -3,6 +3,7 @@ import { join, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
 import type { VaultProject, VaultAgent, VaultTask } from '../vault/types.js'
 import { isBlocked } from '../vault/task.js'
+import type { UnprocessedItem } from '../edisciplinas/registry.js'
 
 const MODE_MAP: Record<string, string> = {
   vhdl: 'vhdl.md',
@@ -156,11 +157,24 @@ export async function buildSessionPrompt(
   return fixedPart + contextSection
 }
 
+function renderEdisciplinasSection(items: UnprocessedItem[], _disciplineId: string): string {
+  if (items.length === 0) return ''
+  return [
+    '## Materiais e-Disciplinas não processados',
+    '',
+    ...items.map((i) => `- [${i.priority}] ${i.section} — ${i.filename}`),
+    '',
+    'Use `taverna_mark_processed` ao estudar cada item.',
+    '',
+  ].join('\n')
+}
+
 export async function buildPrompt(
   agent: VaultAgent,
   project: VaultProject,
   maxChars: number,
   previousOutput?: string,
+  edisciplinasItems?: UnprocessedItem[],
 ): Promise<string> {
   const rawTarget = typeof project.raw['target'] === 'string' ? project.raw['target'] : undefined
   const target = rawTarget ? resolveTarget(rawTarget) : undefined
@@ -170,6 +184,11 @@ export async function buildPrompt(
     .filter((t) => t.progresso < 100)
     .filter((t) => !isBlocked(t, allTasks).blocked)
   const directiveText = await resolveDirectiveText(agent, pending[0])
+
+  const edisciplinasSection =
+    project.tipo === 'USP' && edisciplinasItems && edisciplinasItems.length > 0
+      ? renderEdisciplinasSection(edisciplinasItems, project.id)
+      : ''
 
   const meta = [
     '# Agent Task',
@@ -185,6 +204,7 @@ export async function buildPrompt(
     '',
     COMPLETION_PROTOCOL,
     '',
+    ...(edisciplinasSection ? [edisciplinasSection] : []),
     ...(previousOutput ? ['## Previous Agent Output', '', previousOutput, ''] : []),
   ].join('\n')
 
