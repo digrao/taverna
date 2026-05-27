@@ -6,6 +6,10 @@
   "bin": {
     "taverna": "./dist/cli.js"
   },
+  "exports": {
+    ".": "./dist/cli.js",
+    "./vault": "./dist/vault/index.js"
+  },
   "scripts": {
     "build": "tsc && cp -r src/server/slides dist/server/",
     "dev": "tsx src/cli.ts",

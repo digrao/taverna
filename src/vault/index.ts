@@ -21,6 +21,12 @@ export { updateProjectStatus, updateCompletedTaskSessionId } from './update.js'
 export type { ProjectStatusUpdate } from './update.js'
 export type * from './types.js'
 
+/** Convenience wrapper — uses default config for a given vault path. */
+export async function scanVaultPath(vaultPath: string): Promise<VaultState> {
+  const { defineConfig } = await import('../config.js')
+  return scanVault(defineConfig({ vaultPath }))
+}
+
 export async function scanVault(config: TavernaConfig): Promise<VaultState> {
   const projectsDir = join(config.vaultPath, config.projectsDir)
   const directivesDir = join(config.vaultPath, config.directivesDir)
