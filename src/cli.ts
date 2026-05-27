@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander'
 import { join } from 'node:path'
-import { defineConfig } from './config.js'
+import { defineConfig, resolveVaultPath } from './config.js'
 import {
   scanVault,
   appendLogbook,
@@ -24,12 +24,12 @@ import type { TavernaConfig } from './config.js'
 import type { ExecutorOptions } from './pm/executor.js'
 
 function getVaultPath(opts: { vault?: string }): string {
-  const vaultPath = opts.vault ?? process.env['VAULT_PATH']
-  if (!vaultPath) {
-    console.error('Error: vault path required (--vault <path> or VAULT_PATH env var)')
+  try {
+    return resolveVaultPath(opts.vault)
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e))
     process.exit(1)
   }
-  return vaultPath
 }
 
 async function runOnce(

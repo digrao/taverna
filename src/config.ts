@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { homedir } from 'node:os'
 
 export interface TavernaConfig {
   vaultPath: string
@@ -14,19 +15,17 @@ export interface TavernaConfig {
   copypartyUrl?: string
   gdriveRemote: string
   gdriveBasePath: string
-  // Default agent per project tipo when project.agent is not set
   agentDefaults: Record<string, string>
-  // Scheduler idle detection (minutes without Claude Code activity → consider idle)
   idleThresholdMinutes?: number
-  // Default run_window when project does not specify one
   defaultRunWindow?: string
 }
 
-/** Load KEY=VALUE pairs from <vaultPath>/.env into process.env (non-destructive). */
-function loadVaultEnv(vaultPath: string): void {
-  const envFile = join(vaultPath, '.env')
-  if (!existsSync(envFile)) return
-  for (const line of readFileSync(envFile, 'utf8').split('\n')) {
+const SYSTEM_ENV = join(homedir(), '.config', 'taverna', '.env')
+
+/** Load KEY=VALUE pairs from a file into process.env (non-destructive). */
+function loadEnvFile(filePath: string): void {
+  if (!existsSync(filePath)) return
+  for (const line of readFileSync(filePath, 'utf8').split('\n')) {
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith('#')) continue
     const eq = trimmed.indexOf('=')
@@ -40,15 +39,37 @@ function loadVaultEnv(vaultPath: string): void {
   }
 }
 
+/**
+ * Resolve vault path from, in order:
+ *   1. explicit override
+ *   2. VAULT_PATH env var
+ *   3. ~/.config/taverna/.env
+ */
+export function resolveVaultPath(override?: string): string {
+  if (override) return override
+  // Load system config before checking env so it can supply VAULT_PATH
+  loadEnvFile(SYSTEM_ENV)
+  const vaultPath = process.env['VAULT_PATH']
+  if (!vaultPath) {
+    throw new Error(
+      'Vault path not configured. Set VAULT_PATH env var or add it to ~/.config/taverna/.env',
+    )
+  }
+  return vaultPath
+}
+
 export function defineConfig(
-  overrides: Partial<TavernaConfig> & { vaultPath: string },
+  overrides: Partial<TavernaConfig> & { vaultPath?: string } = {},
 ): TavernaConfig {
-  loadVaultEnv(overrides.vaultPath)
+  const vaultPath = resolveVaultPath(overrides.vaultPath)
+
+  // Load vault-local .env on top (non-destructive, so system env wins)
+  loadEnvFile(join(vaultPath, '.env'))
 
   const copypartyUrl = overrides.copypartyUrl ?? process.env['COPYPARTY_URL']
   const pad = (n: number) => String(n).padStart(2, '0')
   return {
-    vaultPath: overrides.vaultPath,
+    vaultPath,
     projectsDir: overrides.projectsDir ?? '10_Projects',
     directivesDir: overrides.directivesDir ?? '60_Agents/1_Directives',
     logbooksDir: overrides.logbooksDir ?? '60_Agents/2_Logbooks',
@@ -89,4 +110,9 @@ export function defineConfig(
       : {}),
     ...(copypartyUrl !== undefined ? { copypartyUrl } : {}),
   }
+}
+
+/** Zero-argument config loader — resolves vault path automatically. */
+export function loadConfig(overrides: Partial<TavernaConfig> = {}): TavernaConfig {
+  return defineConfig(overrides)
 }

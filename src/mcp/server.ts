@@ -6,18 +6,19 @@ import { addTask } from '../vault/task-scaffold.js'
 import { scaffoldProject } from '../vault/project-scaffold.js'
 import { features } from '../infra/feature-map.js'
 import type { FeatureContext, FeatureDef } from '../infra/feature-map.js'
-import { defineConfig } from '../config.js'
+import { loadConfig } from '../config.js'
 import { loadPlugins, collectPluginFeatures } from '../plugin/loader.js'
 
 // stdout is the MCP protocol channel — never write there directly
 const log = (...args: unknown[]) => process.stderr.write(args.join(' ') + '\n')
 
-const VAULT_PATH = process.env['VAULT_PATH'] ?? ''
+const config = loadConfig()
+const VAULT_PATH = config.vaultPath
 const PROJECTS_DIR = join(VAULT_PATH, '10_Projects')
 
 const ctx: FeatureContext = {
   vaultPath: VAULT_PATH,
-  config: defineConfig({ vaultPath: VAULT_PATH }),
+  config,
 }
 
 function ok(data: unknown) {
