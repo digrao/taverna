@@ -1,0 +1,12 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  pipeline:
+    uses: jvcm-infra/workflows/.github/workflows/cli-ts.yml@main
+    with:
+      app: taverna
