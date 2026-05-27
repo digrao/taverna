@@ -21,6 +21,13 @@ export { updateProjectStatus, updateCompletedTaskSessionId } from './update.js'
 export type { ProjectStatusUpdate } from './update.js'
 export type * from './types.js'
 
+/** Resolve vault path from VAULT_PATH env var. Throws if not set. */
+export function getVaultPath(): string {
+  const vaultPath = process.env['VAULT_PATH']
+  if (!vaultPath) throw new Error('VAULT_PATH environment variable is not set')
+  return vaultPath
+}
+
 /** Convenience wrapper — uses default config for a given vault path. */
 export async function scanVaultPath(vaultPath: string): Promise<VaultState> {
   const { defineConfig } = await import('../config.js')
