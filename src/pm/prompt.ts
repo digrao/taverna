@@ -55,6 +55,17 @@ export function resolveTarget(raw: string): string {
   return raw
 }
 
+// Resolves workspace path from target (legacy) or workspace_dir field
+function resolveWorkspacePath(project: VaultProject): string | undefined {
+  const rawTarget = typeof project.raw['target'] === 'string' ? project.raw['target'] : undefined
+  if (rawTarget) return resolveTarget(rawTarget)
+  if (project.workspaceDir) {
+    const home = process.env['HOME'] ?? `/home/${process.env['USER'] ?? 'user'}`
+    return project.workspaceDir.replace(/^~/, home)
+  }
+  return undefined
+}
+
 function renderTask(t: VaultTask): string {
   const icon = PRIORITY_ICON[t.prioridade] ?? '·'
   const lines = [`### ${icon} ${t.id} (${t.progresso}%)`, `_file: ${t.filePath}_`]
@@ -96,8 +107,7 @@ export async function buildSessionPrompt(
   sessionId: string,
   logtaskPath: string,
 ): Promise<string> {
-  const rawTarget = typeof project.raw['target'] === 'string' ? project.raw['target'] : undefined
-  const target = rawTarget ? resolveTarget(rawTarget) : undefined
+  const target = resolveWorkspacePath(project)
   const directiveText = await resolveDirectiveText(agent, sessionTasks[0])
 
   const meta = [
@@ -162,8 +172,7 @@ export async function buildPrompt(
   maxChars: number,
   previousOutput?: string,
 ): Promise<string> {
-  const rawTarget = typeof project.raw['target'] === 'string' ? project.raw['target'] : undefined
-  const target = rawTarget ? resolveTarget(rawTarget) : undefined
+  const target = resolveWorkspacePath(project)
 
   const allTasks = project.tasks
   const pending = allTasks
