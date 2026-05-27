@@ -15,12 +15,11 @@ import { resolvePolicy } from './policy-resolver.js'
 import { checkBudget, recordCost, loadVaultBudgetConfig } from './budget.js'
 import type { BudgetConfig } from './budget.js'
 import {
-  matrixConfigFromEnv,
-  sendMatrixMessage,
   formatAgentRunMessage,
   formatActionRequiredMessage,
   formatAgentStartMessage,
 } from './matrix.js'
+import { getNotifier } from '../notifications/index.js'
 import { markActive, markInactive } from './active.js'
 
 export interface ExecutorOptions {
@@ -292,15 +291,15 @@ export async function runSession(
     tmuxSession: sessionName,
   })
 
-  const matrixCfgStart = matrixConfigFromEnv()
-  if (matrixCfgStart) {
-    sendMatrixMessage(
-      matrixCfgStart,
-      formatAgentStartMessage(projectLabel, agentLabel, sessionName, sessionId),
-    ).catch(() => {
-      /* non-fatal */
+  getNotifier()
+    .send({
+      text: formatAgentStartMessage(projectLabel, agentLabel, sessionName, sessionId),
+      urgency: 'info',
+      project: project.id,
+      agent: agent.id,
+      sessionId,
     })
-  }
+    .catch(() => {})
 
   const start = Date.now()
   try {
@@ -374,15 +373,18 @@ export async function runSession(
       }
     }
 
-    const matrixCfg = matrixConfigFromEnv()
-    if (matrixCfg) {
-      const msg = actionRequired
-        ? formatActionRequiredMessage(projectLabel, agentLabel, actionRequired, sessionId)
-        : formatAgentRunMessage(projectLabel, agentLabel, resultado, sessionId)
-      sendMatrixMessage(matrixCfg, msg).catch(() => {
-        /* non-fatal */
+    const notifyMsg = actionRequired
+      ? formatActionRequiredMessage(projectLabel, agentLabel, actionRequired, sessionId)
+      : formatAgentRunMessage(projectLabel, agentLabel, resultado, sessionId)
+    getNotifier()
+      .send({
+        text: notifyMsg,
+        urgency: actionRequired ? 'critical' : 'info',
+        project: project.id,
+        agent: agent.id,
+        sessionId,
       })
-    }
+      .catch(() => {})
 
     return {
       success: true,
@@ -567,15 +569,15 @@ export async function runAgent(
     startedAt: new Date().toISOString(),
     tmuxSession: sessionName,
   })
-  const matrixCfgStart = matrixConfigFromEnv()
-  if (matrixCfgStart) {
-    sendMatrixMessage(
-      matrixCfgStart,
-      formatAgentStartMessage(projectLabel, agentLabel, sessionName, sessionId),
-    ).catch(() => {
-      /* non-fatal */
+  getNotifier()
+    .send({
+      text: formatAgentStartMessage(projectLabel, agentLabel, sessionName, sessionId),
+      urgency: 'info',
+      project: project.id,
+      agent: agent.id,
+      sessionId,
     })
-  }
+    .catch(() => {})
   const start = Date.now()
   try {
     const { text, usage } = await spawnClaude(
@@ -649,16 +651,18 @@ export async function runAgent(
       }
     }
 
-    // Matrix notification on ACTION_REQUIRED or completion
-    const matrixCfg = matrixConfigFromEnv()
-    if (matrixCfg) {
-      const msg = actionRequired
-        ? formatActionRequiredMessage(projectLabel, agentLabel, actionRequired, sessionId)
-        : formatAgentRunMessage(projectLabel, agentLabel, resultado, sessionId)
-      sendMatrixMessage(matrixCfg, msg).catch(() => {
-        /* non-fatal */
+    const sessionMsg = actionRequired
+      ? formatActionRequiredMessage(projectLabel, agentLabel, actionRequired, sessionId)
+      : formatAgentRunMessage(projectLabel, agentLabel, resultado, sessionId)
+    getNotifier()
+      .send({
+        text: sessionMsg,
+        urgency: actionRequired ? 'critical' : 'info',
+        project: project.id,
+        agent: agent.id,
+        sessionId,
       })
-    }
+      .catch(() => {})
 
     return {
       success: true,

@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander'
 import { join } from 'node:path'
-import { morning } from './morning/index.js'
 import { defineConfig } from './config.js'
 import {
   scanVault,
@@ -153,18 +152,6 @@ async function drainProject(
 const program = new Command('taverna')
   .description('Vault-first project orchestrator')
   .version('0.1.0')
-
-// ── morning ───────────────────────────────────────────────────────────────────
-
-program
-  .command('morning')
-  .description("Generate morning dashboard with yesterday's results and project priorities")
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--dry-run', 'Print to stdout instead of writing to inbox')
-  .action(async (opts: { vault?: string; dryRun?: boolean }) => {
-    const config = defineConfig({ vaultPath: getVaultPath(opts) })
-    await morning(config, { dryRun: opts.dryRun ?? false })
-  })
 
 // ── run ───────────────────────────────────────────────────────────────────────
 
