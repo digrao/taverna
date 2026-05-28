@@ -24,6 +24,7 @@ export async function scaffoldPlugin(opts: ScaffoldOptions): Promise<ScaffoldRes
   }
 
   await mkdir(join(pluginDir, 'src'), { recursive: true })
+  await mkdir(join(pluginDir, 'tests'), { recursive: true })
 
   const files: string[] = []
 
@@ -151,6 +152,32 @@ const plugin: TavernaPlugin = {
 }
 
 export default plugin
+`,
+  )
+
+  await write(
+    'tests/plugin.test.ts',
+    `import { describe, it, expect } from 'vitest'
+import plugin from '../src/index.js'
+
+describe('taverna-${baseName} plugin', () => {
+  it('has a name', () => {
+    expect(plugin.name).toBe('taverna-${baseName}')
+  })
+
+  it('exports at least one feature', () => {
+    expect(plugin.features?.length).toBeGreaterThan(0)
+  })
+
+  it('all features have required fields', () => {
+    for (const f of plugin.features ?? []) {
+      expect(f.name).toBeTruthy()
+      expect(f.description).toBeTruthy()
+      expect(f.httpMethod).toMatch(/^GET|POST$/)
+      expect(typeof f.handler).toBe('function')
+    }
+  })
+})
 `,
   )
 
