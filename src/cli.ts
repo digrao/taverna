@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { Command } from 'commander'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
+import { createRequire } from 'node:module'
+const _req = createRequire(import.meta.url)
+const { version: _version } = _req('../package.json') as { version: string }
 import { defineConfig, resolveVaultPath } from './config.js'
 import {
   scanVault,
@@ -151,7 +154,7 @@ async function drainProject(
 
 const program = new Command('taverna')
   .description('Vault-first project orchestrator')
-  .version('0.1.0')
+  .version(_version)
 
 // ── run ───────────────────────────────────────────────────────────────────────
 
@@ -1242,6 +1245,37 @@ program
   .action(async (opts: { apiUrl?: string }) => {
     if (opts.apiUrl) process.env['TAVERNA_API_URL'] = opts.apiUrl
     await import('./mcp/server.js')
+  })
+
+// ── create-plugin ─────────────────────────────────────────────────────────────
+
+program
+  .command('create-plugin <name>')
+  .description('Scaffold a new taverna plugin in ~/tools/taverna-<name>/')
+  .option(
+    '--dir <path>',
+    'Parent directory for the new plugin',
+    join(dirname(_req.resolve('../package.json')), '..'),
+  )
+  .option('--with-cli', 'Also scaffold a src/cli.ts entry point')
+  .action(async (name: string, opts: { dir: string; withCli?: boolean }) => {
+    const { scaffoldPlugin } = await import('./plugin/scaffold.js')
+    try {
+      const { pluginDir, files } = await scaffoldPlugin({
+        name,
+        targetDir: opts.dir,
+        withCli: opts.withCli,
+      })
+      console.log(`created taverna-${name} at ${pluginDir}`)
+      for (const f of files) console.log(`  ${f}`)
+      console.log(`\nnext steps:`)
+      console.log(`  cd ${pluginDir}`)
+      console.log(`  npm install`)
+      console.log(`  npm run build`)
+    } catch (e) {
+      console.error(e instanceof Error ? e.message : String(e))
+      process.exit(1)
+    }
   })
 
 program.parse()
