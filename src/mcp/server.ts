@@ -7,7 +7,7 @@ import { scaffoldProject } from '../vault/project-scaffold.js'
 import { features } from '../infra/feature-map.js'
 import type { FeatureContext, FeatureDef } from '../infra/feature-map.js'
 import { loadConfig } from '../config.js'
-import { loadPlugins, collectPluginFeatures } from '../plugin/loader.js'
+import { loadPluginFeatures } from '../plugin/loader.js'
 
 // stdout is the MCP protocol channel — never write there directly
 const log = (...args: unknown[]) => process.stderr.write(args.join(' ') + '\n')
@@ -34,8 +34,7 @@ const server = new McpServer({ name: 'taverna', version: '0.1.0' })
 // ── Auto-registered feature tools ──────────────────────────────────────────────
 // Core features + plugin features all become taverna_<name> MCP tools.
 
-const plugins = await loadPlugins()
-const allFeatures: FeatureDef[] = [...features, ...collectPluginFeatures(plugins)]
+const allFeatures: FeatureDef[] = [...features, ...(await loadPluginFeatures())]
 
 for (const feature of allFeatures) {
   server.tool(

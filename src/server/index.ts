@@ -3,18 +3,23 @@ import type { Server } from 'node:http'
 import type { TavernaConfig } from '../config.js'
 import { VaultCache } from './cache.js'
 import { Router } from './routes.js'
+import { loadPluginFeatures } from '../plugin/loader.js'
 
 export interface ServeOptions {
   port?: number
 }
 
-export function createServer(config: TavernaConfig, opts: ServeOptions = {}): Server {
+export async function createServer(
+  config: TavernaConfig,
+  opts: ServeOptions = {},
+): Promise<Server> {
   const port = opts.port ?? 2948
   const cache = new VaultCache(config)
-  const router = new Router(cache, config)
+  const pluginFeatures = await loadPluginFeatures()
+  const router = new Router(cache, config, pluginFeatures)
 
   const server = httpCreateServer((req, res) => {
-    router.handle(req, res).catch(err => {
+    router.handle(req, res).catch((err) => {
       console.error('server error:', err)
       if (!res.headersSent) {
         res.writeHead(500, { 'Content-Type': 'application/json' })

@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { VaultCache } from './cache.js'
 import type { TavernaConfig } from '../config.js'
+import type { FeatureDef, FeatureContext } from '../infra/feature-map.js'
 import { parseFrontmatter, getString } from '../vault/frontmatter.js'
 import { findBacklinks } from '../vault/backlinks.js'
 import { watch } from 'node:fs'
@@ -19,11 +20,14 @@ type SSEClient = ServerResponse
 
 export class Router {
   private sseClients = new Set<SSEClient>()
+  private featureCtx: FeatureContext
 
   constructor(
     private cache: VaultCache,
     private config: TavernaConfig,
+    private pluginFeatures: FeatureDef[] = [],
   ) {
+    this.featureCtx = { vaultPath: config.vaultPath, config, scan: () => cache.get() }
     cache.onRefresh = () => this.broadcast('update')
 
     // Watch /tmp/taverna-active/ and broadcast agent_active events when runs start/stop
