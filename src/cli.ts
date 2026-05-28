@@ -1266,7 +1266,7 @@ program
         targetDir: opts.dir,
         withCli: opts.withCli,
       })
-      console.log(`created taverna-${name} at ${pluginDir}`)
+      console.log(`created ${pluginDir}`)
       for (const f of files) console.log(`  ${f}`)
       console.log(`\nnext steps:`)
       console.log(`  cd ${pluginDir}`)
