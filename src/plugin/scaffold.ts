@@ -17,7 +17,8 @@ export interface ScaffoldResult {
 }
 
 export async function scaffoldPlugin(opts: ScaffoldOptions): Promise<ScaffoldResult> {
-  const pluginDir = join(opts.targetDir, `taverna-${opts.name}`)
+  const baseName = opts.name.startsWith('taverna-') ? opts.name.slice('taverna-'.length) : opts.name
+  const pluginDir = join(opts.targetDir, `taverna-${baseName}`)
   if (existsSync(pluginDir)) {
     throw new Error(`directory already exists: ${pluginDir}`)
   }
@@ -32,11 +33,11 @@ export async function scaffoldPlugin(opts: ScaffoldOptions): Promise<ScaffoldRes
   }
 
   const pkg = {
-    name: `taverna-${opts.name}`,
+    name: `taverna-${baseName}`,
     version: '0.1.0',
     description: '',
     type: 'module',
-    ...(opts.withCli ? { bin: { [`taverna-${opts.name}`]: './dist/cli.js' } } : {}),
+    ...(opts.withCli ? { bin: { [`taverna-${baseName}`]: './dist/cli.js' } } : {}),
     scripts: {
       build: 'tsc',
       typecheck: 'tsc --noEmit',
@@ -133,15 +134,15 @@ dist/
 import type { FeatureContext } from 'taverna/infra'
 
 const plugin: TavernaPlugin = {
-  name: 'taverna-${opts.name}',
+  name: 'taverna-${baseName}',
 
   features: [
     {
-      name: '${opts.name}_ping',
+      name: '${baseName}_ping',
       description: 'Health check',
       params: {},
       httpMethod: 'GET',
-      httpPath: '/api/${opts.name}/ping',
+      httpPath: '/api/${baseName}/ping',
       handler: async (_: Record<string, unknown>, ctx: FeatureContext) => {
         return { ok: true, vault: ctx.vaultPath }
       },
@@ -160,7 +161,7 @@ export default plugin
 import { Command } from 'commander'
 import plugin from './index.js'
 
-const program = new Command('taverna-${opts.name}').description(plugin.name).version('0.1.0')
+const program = new Command('taverna-${baseName}').description(plugin.name).version('0.1.0')
 
 program
   .command('ping')
