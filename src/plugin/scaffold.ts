@@ -59,6 +59,7 @@ export async function scaffoldPlugin(opts: ScaffoldOptions): Promise<ScaffoldRes
       '@typescript-eslint/parser': '^8.0.0',
       eslint: '^10.0.0',
       'lint-staged': '^17.0.0',
+      prettier: '^3.0.0',
       'simple-git-hooks': '^2.0.0',
       'typescript-eslint': '^8.0.0',
       typescript: '^5.0.0',
