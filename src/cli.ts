@@ -1101,7 +1101,7 @@ program
     const { createServer } = await import('./server/index.js')
     const vaultPath = getVaultPath(opts)
     const config = defineConfig({ vaultPath })
-    createServer(config, { port: Number(opts.port ?? 2948) })
+    await createServer(config, { port: Number(opts.port ?? 2948) })
   })
 
 // ── next ──────────────────────────────────────────────────────────────────────

@@ -95,7 +95,29 @@ export class Router {
     if (path === '/events') return this.handleSSE(req, res)
     if (path === '/inbox') return this.handleInbox(req, res)
     if (path === '/backlinks') return this.handleBacklinks(req, res, url)
+
+    // Plugin routes — dispatched generically from loaded plugin features
+    const pluginFeature = this.pluginFeatures.find(
+      (f) => f.httpMethod === method && f.httpPath === path,
+    )
+    if (pluginFeature) return this.handlePluginFeature(req, res, pluginFeature)
+
     this.json(res, { error: 'not found' }, 404)
+  }
+
+  private async handlePluginFeature(
+    req: IncomingMessage,
+    res: ServerResponse,
+    feature: FeatureDef,
+  ): Promise<void> {
+    const params =
+      feature.httpMethod === 'POST' ? ((await this.readBody(req)) as Record<string, unknown>) : {}
+    try {
+      const result = await feature.handler(params, this.featureCtx)
+      this.json(res, result)
+    } catch (e) {
+      this.json(res, { error: e instanceof Error ? e.message : String(e) }, 500)
+    }
   }
 
   private async handleStatus(_req: IncomingMessage, res: ServerResponse): Promise<void> {
