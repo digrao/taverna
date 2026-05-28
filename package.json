@@ -8,7 +8,9 @@
   },
   "exports": {
     ".": "./dist/cli.js",
-    "./vault": "./dist/vault/index.js"
+    "./vault": "./dist/vault/index.js",
+    "./plugin": "./dist/plugin/types.js",
+    "./infra": "./dist/infra/feature-map.js"
   },
   "scripts": {
     "build": "tsc && cp -r src/server/slides dist/server/",
