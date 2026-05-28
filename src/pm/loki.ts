@@ -57,7 +57,10 @@ const FREQ_MS: Record<string, number> = {
   monthly: 2_592_000_000,
 }
 
-export function computeHealth(project: VaultProject): ProjectSnapshotPayload {
+export function computeHealth(
+  project: VaultProject,
+  opts?: { now?: Date },
+): ProjectSnapshotPayload {
   const pending = project.tasks.filter((t) => t.progresso < 100)
   const tasks_total = project.tasks.length
   const tasks_done = project.tasks.filter((t) => t.progresso === 100).length
@@ -68,12 +71,12 @@ export function computeHealth(project: VaultProject): ProjectSnapshotPayload {
 
   // Find nearest deadline among pending tasks
   let deadline_days: number | undefined
-  const now = Date.now()
+  const now = opts?.now ? opts.now.getTime() : Date.now()
   for (const task of pending) {
     if (!task.deadline) continue
     const d = new Date(task.deadline).getTime()
     if (isNaN(d)) continue
-    const days = Math.ceil((d - now) / 86_400_000)
+    const days = Math.floor((d - now) / 86_400_000)
     if (deadline_days === undefined || days < deadline_days) deadline_days = days
   }
 

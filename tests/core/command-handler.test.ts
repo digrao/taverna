@@ -104,7 +104,7 @@ describe('Command Registry', () => {
       id: 'slow',
       description: 'Slow command',
       handler: async () => {
-        await new Promise((r) => setTimeout(r, 10))
+        await new Promise((r) => setTimeout(r, 20))
         return { success: true }
       },
     })

@@ -50,7 +50,7 @@ export function scoreProject(
   const factors: ScoreFactor[] = []
   let score = 0
 
-  const health = computeHealth(project)
+  const health = computeHealth(project, { now: ctx.now })
 
   // 1. Deadline urgency (highest weight)
   if (health.deadline_days !== undefined) {
