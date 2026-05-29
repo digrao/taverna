@@ -1,6 +1,6 @@
 {
   "name": "taverna",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Vault-first project orchestrator",
   "type": "module",
   "bin": {
@@ -53,6 +53,9 @@
     "pre-commit": "npx lint-staged"
   },
   "lint-staged": {
-    "*.ts": ["eslint --fix", "prettier --write"]
+    "*.ts": [
+      "eslint --fix",
+      "prettier --write"
+    ]
   }
 }
