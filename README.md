@@ -100,17 +100,14 @@ depends:
 ## Usage
 
 ```bash
-# Run one scheduler tick (all eligible projects)
-taverna execute
+# Dispatch agents on all eligible projects and exit
+taverna work
 
-# Drain a single project (up to N task iterations)
-taverna execute --drain --max-tasks 3
-
-# Run the continuous scheduler daemon (60s tick)
-taverna schedule
+# Drain tasks sequentially per project (up to N iterations)
+taverna work --drain --max-tasks 3
 
 # Dry-run — show what would run without executing
-taverna schedule --dry-run
+taverna work --dry-run
 
 # Run a specific project manually
 taverna run --project <id>
@@ -130,12 +127,14 @@ taverna mcp
 
 ## How scheduling works
 
-Each tick:
+`taverna work` is a one-shot, stateless process: it reads the vault, dispatches eligible agents, and exits. There is no daemon or internal loop — cadence is handled externally by a systemd timer (or any cron-like mechanism).
+
+Each run:
 
 1. **Scan** — reads all projects and tasks from the vault
 2. **Filter** — skips projects that are not due (`run_every`), outside their `run_window`, or over budget
 3. **Rank** — scores eligible projects by deadline urgency, priority, health, active tasks, and staleness
-4. **Execute** — for each project in score order, spawns `claude --print` with a built prompt containing the agent directive, active tasks, and the Task Completion Protocol
+4. **Dispatch** — for each project in score order, spawns `claude --print` with a built prompt containing the agent directive, active tasks, and the Task Completion Protocol
 
 The agent is expected to:
 - Update `progresso:` in the task frontmatter when it makes progress
@@ -143,7 +142,7 @@ The agent is expected to:
 - Append an entry to `logbook.md`
 - End its output with `RESULTADO: <summary>` or `ACTION_REQUIRED: <what is needed>`
 
-`_last_run` is only advanced on success — failures retry on the next cycle.
+`_last_run` is only advanced on success — failures retry on the next run.
 
 ## Project scoring
 
