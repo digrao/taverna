@@ -312,13 +312,13 @@ sessionCmd
     },
   )
 
-// ── execute ───────────────────────────────────────────────────────────────────
+// ── work ─────────────────────────────────────────────────────────────────────
 
 program
-  .command('execute')
-  .description('Run agents on all eligible projects (one scheduler tick)')
+  .command('work')
+  .description('Dispatch agents on all eligible projects and exit (one-shot)')
   .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--dry-run', 'Print prompts without executing')
+  .option('--dry-run', 'Print what would run without executing')
   .option('--drain', 'Run tasks sequentially per project until done')
   .option('--max-tasks <n>', 'Max tasks per project (default: 3)', '3')
   .action(
@@ -329,40 +329,6 @@ program
       const typePolicies = defaultTypePolicies(config)
       await runScheduler(config, typePolicies, plugins, {
         ...(opts.dryRun !== undefined ? { dryRun: opts.dryRun } : {}),
-        maxTicks: 1,
-        maxTasksPerProject: opts.drain ? Number(opts.maxTasks ?? 3) : 1,
-      })
-    },
-  )
-
-// ── schedule ──────────────────────────────────────────────────────────────────
-
-program
-  .command('schedule')
-  .description('Run the scheduler daemon (continuous tick loop, default: 60s)')
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--dry-run', 'Print what would run without executing')
-  .option('--once', 'Run a single tick and exit')
-  .option('--tick-ms <n>', 'Tick interval in ms (default: 60000)')
-  .option('--drain', 'Run tasks sequentially per project until done')
-  .option('--max-tasks <n>', 'Max tasks per project in drain mode (default: 3)', '3')
-  .action(
-    async (opts: {
-      vault?: string
-      dryRun?: boolean
-      once?: boolean
-      tickMs?: string
-      drain?: boolean
-      maxTasks?: string
-    }) => {
-      const vaultPath = getVaultPath(opts)
-      const config = defineConfig({ vaultPath })
-      const plugins = await loadPlugins()
-      const typePolicies = defaultTypePolicies(config)
-      await runScheduler(config, typePolicies, plugins, {
-        ...(opts.dryRun !== undefined ? { dryRun: opts.dryRun } : {}),
-        ...(opts.once ? { maxTicks: 1 } : {}),
-        ...(opts.tickMs ? { tickMs: Number(opts.tickMs) } : {}),
         maxTasksPerProject: opts.drain ? Number(opts.maxTasks ?? 3) : 1,
       })
     },
