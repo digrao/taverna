@@ -9,7 +9,6 @@ import { scanVault, updateProjectStatus, appendLogbook } from './vault/index.js'
 import { runPipeline, runSession } from './pm/executor.js'
 import { snapshot } from './pm/loki.js'
 import { emitEvent } from './pm/event-bus.js'
-import { processInbox, MAX_CHARS_PER_RUN } from './inbox/index.js'
 import { migrate } from './migrate/index.js'
 import { defaultTypePolicies } from './pm/policies.js'
 import { drainProject } from './pm/execute.js'
@@ -368,36 +367,6 @@ program
       })
     },
   )
-
-// ── inbox ─────────────────────────────────────────────────────────────────────
-
-program
-  .command('inbox')
-  .description('Process 00_Inbox: cluster ideas and move to 40_Archives/projetos-incompletos')
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--dry-run', 'Print prompt without processing')
-  .option('--max-chars <n>', `Max inbox chars per run (default: ${MAX_CHARS_PER_RUN})`)
-  .action(async (opts: { vault?: string; dryRun?: boolean; maxChars?: string }) => {
-    const vaultPath = getVaultPath(opts)
-    const config = defineConfig({ vaultPath })
-    const maxChars = opts.maxChars ? Number(opts.maxChars) : undefined
-
-    const result = await processInbox(config, {
-      dryRun: opts.dryRun ?? false,
-      ...(maxChars !== undefined ? { maxChars } : {}),
-    })
-
-    if (result.processed === 0 && result.skipped === 0 && !opts.dryRun) {
-      console.log('Inbox empty — nothing to process.')
-      return
-    }
-    if (!opts.dryRun) {
-      console.log(`  processed: ${result.processed}`)
-      if (result.skipped > 0)
-        console.log(`  deferred:  ${result.skipped} (over char limit, next run)`)
-      for (const e of result.errors) console.error(`  error   ${e.file}: ${e.error}`)
-    }
-  })
 
 // ── migrate ───────────────────────────────────────────────────────────────────
 

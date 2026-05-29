@@ -10,7 +10,9 @@
     ".": "./dist/cli.js",
     "./vault": "./dist/vault/index.js",
     "./plugin": "./dist/plugin/types.js",
-    "./infra": "./dist/infra/feature-map.js"
+    "./infra": "./dist/infra/feature-map.js",
+    "./inbox": "./dist/inbox/index.js",
+    "./config": "./dist/config.js"
   },
   "scripts": {
     "build": "tsc && cp -r src/server/slides dist/server/",
