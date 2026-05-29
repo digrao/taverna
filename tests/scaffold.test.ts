@@ -95,13 +95,13 @@ describe('addTask', () => {
       topic: 'Lab 2',
       prioridade: 'média',
       assetFolder: '02_Lab',
-      workspace: '/home/jvcm/lab2/',
+      workspace: '/tmp/taverna-workspace/',
       dependsOn: ['lab_1'],
     })
 
     const content = readFileSync(result.filePath, 'utf8')
     expect(content).toContain('asset_folder: 02_Lab')
-    expect(content).toContain('workspace: /home/jvcm/lab2/')
+    expect(content).toContain('workspace: /tmp/taverna-workspace/')
     expect(content).toContain('depends_on:')
     expect(content).toContain('  - lab_1')
   })

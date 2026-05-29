@@ -1,5 +1,3 @@
-import { NeoMatrixClient } from '@jvcm-infra/neo-matrix'
-
 export interface MatrixConfig {
   homeserver: string
   roomId: string
@@ -15,14 +13,30 @@ export function matrixConfigFromEnv(): MatrixConfig | undefined {
   return { homeserver, roomId, accessToken }
 }
 
+/**
+ * Send a plain-text message to a Matrix room via the client-server API.
+ * Uses the standard PUT /rooms/{roomId}/send endpoint — no external library needed.
+ *
+ * Future: a taverna-matrix plugin can register a custom Notifier here for richer
+ * message types (HTML, reactions, edits).
+ */
 export async function sendMatrixMessage(config: MatrixConfig, text: string): Promise<void> {
-  const client = new NeoMatrixClient({
-    homeserver: config.homeserver,
-    accessToken: config.accessToken,
-    roomId: config.roomId,
-    ...(config.displayName !== undefined ? { displayName: config.displayName } : {}),
+  const txnId = Date.now().toString(36)
+  const roomEncoded = encodeURIComponent(config.roomId)
+  const url = `${config.homeserver}/_matrix/client/v3/rooms/${roomEncoded}/send/m.room.message/${txnId}`
+
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${config.accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ msgtype: 'm.text', body: text }),
   })
-  await client.send(text)
+
+  if (!res.ok) {
+    throw new Error(`Matrix send failed: ${res.status} ${res.statusText}`)
+  }
 }
 
 export function formatAgentStartMessage(

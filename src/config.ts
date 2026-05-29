@@ -18,6 +18,7 @@ export interface TavernaConfig {
   agentDefaults: Record<string, string>
   idleThresholdMinutes?: number
   defaultRunWindow?: string
+  policiesPath: string
 }
 
 const SYSTEM_ENV = join(homedir(), '.config', 'taverna', '.env')
@@ -108,6 +109,7 @@ export function defineConfig(
     ...(overrides.defaultRunWindow !== undefined
       ? { defaultRunWindow: overrides.defaultRunWindow }
       : {}),
+    policiesPath: overrides.policiesPath ?? process.env['TAVERNA_POLICIES'] ?? 'policies.yaml',
     ...(copypartyUrl !== undefined ? { copypartyUrl } : {}),
   }
 }

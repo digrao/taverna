@@ -1,6 +1,5 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { resolveTarget } from './prompt.js'
 import type { VaultAgent, VaultProject } from '../vault/types.js'
 
 export interface ResolvedPolicy {
@@ -9,7 +8,7 @@ export interface ResolvedPolicy {
   // Source breakdown — useful for `taverna policy` display
   agentTools: string[]
   inferredTools: string[]
-  inferredFrom?: string   // resolved path that originated the inference
+  inferredFrom?: string // resolved path that originated the inference
 }
 
 /**
@@ -17,9 +16,13 @@ export interface ResolvedPolicy {
  * Only called when the agent already has explicit permissions (default mode).
  * Grants Write/Edit/Read + git ops if the target is a git repo.
  */
-export function inferProjectTools(rawTarget: string | undefined): { tools: string[]; resolvedPath?: string } {
-  if (!rawTarget) return { tools: [] }
-  const path = resolveTarget(rawTarget)
+export function inferProjectTools(workspaceDir: string | undefined): {
+  tools: string[]
+  resolvedPath?: string
+} {
+  if (!workspaceDir) return { tools: [] }
+  const home = process.env['HOME'] ?? `/home/${process.env['USER'] ?? 'user'}`
+  const path = workspaceDir.replace(/^~/, home)
   if (!existsSync(path)) return { tools: [] }
 
   const tools = ['Write', 'Edit', 'Read']
@@ -48,15 +51,18 @@ export function inferProjectTools(rawTarget: string | undefined): { tools: strin
  */
 export function resolvePolicy(agent: VaultAgent, project: VaultProject): ResolvedPolicy {
   const agentTools = agent.permissions ?? []
-  const rawTarget = typeof project.raw['target'] === 'string' ? project.raw['target'] : undefined
-
   // Only infer when agent has explicit permissions — otherwise bypassPermissions
   // is already in effect and inference would make things more restrictive.
   if (agent.permissions === undefined) {
-    return { permissionMode: 'bypassPermissions', allowedTools: undefined, agentTools: [], inferredTools: [] }
+    return {
+      permissionMode: 'bypassPermissions',
+      allowedTools: undefined,
+      agentTools: [],
+      inferredTools: [],
+    }
   }
 
-  const { tools: inferredTools, resolvedPath } = inferProjectTools(rawTarget)
+  const { tools: inferredTools, resolvedPath } = inferProjectTools(project.workspaceDir)
   const allTools = [...new Set([...agentTools, ...inferredTools])]
 
   return {

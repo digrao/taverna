@@ -166,7 +166,7 @@ tipo: USP              # USP | BB | *
 priority: high         # high | medium | low
 agent: '@study-assistant'
 run_every: daily       # hourly | daily | weekly | monthly | never
-target: 'jvcm@start:tools/taverna/'  # resolvido para /home/jvcm/tools/taverna/
+workspace_dir: ~/tools/taverna/
 budget_usd_daily: 0.50
 pipeline:
   - '@tdd-writer'

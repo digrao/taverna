@@ -48,22 +48,10 @@ async function resolveDirectiveText(
 
 const PRIORITY_ICON: Record<string, string> = { high: '⬆', medium: '·', low: '⬇' }
 
-// Resolves "jvcm@start:some/path" → "/home/jvcm/some/path"
-export function resolveTarget(raw: string): string {
-  const m = raw.match(/^(\w+)@\w+:(.+)$/)
-  if (m) return `/home/${m[1]}/${m[2]}`
-  return raw
-}
-
-// Resolves workspace path from target (legacy) or workspace_dir field
 function resolveWorkspacePath(project: VaultProject): string | undefined {
-  const rawTarget = typeof project.raw['target'] === 'string' ? project.raw['target'] : undefined
-  if (rawTarget) return resolveTarget(rawTarget)
-  if (project.workspaceDir) {
-    const home = process.env['HOME'] ?? `/home/${process.env['USER'] ?? 'user'}`
-    return project.workspaceDir.replace(/^~/, home)
-  }
-  return undefined
+  if (!project.workspaceDir) return undefined
+  const home = process.env['HOME'] ?? `/home/${process.env['USER'] ?? 'user'}`
+  return project.workspaceDir.replace(/^~/, home)
 }
 
 function renderTask(t: VaultTask): string {

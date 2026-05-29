@@ -4,6 +4,7 @@
 import { z } from 'zod'
 import * as fs from 'fs'
 import yaml from 'js-yaml'
+import { loadConfig } from '../config.js'
 
 /**
  * Policy schemas (mirrors policies.schema.ts from root)
@@ -82,7 +83,7 @@ export class PolicyResolver {
   private policies: Policies
   private policyPath: string
 
-  constructor(policyPath: string = '/home/jvcm/tools/policies.yaml') {
+  constructor(policyPath: string) {
     this.policyPath = policyPath
     this.policies = this.loadPolicies()
   }
@@ -292,7 +293,7 @@ let instance: PolicyResolver | null = null
 
 export function getPolicyResolver(): PolicyResolver {
   if (!instance) {
-    instance = new PolicyResolver()
+    instance = new PolicyResolver(loadConfig().policiesPath)
   }
   return instance
 }
