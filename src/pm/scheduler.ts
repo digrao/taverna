@@ -14,6 +14,7 @@ import {
 } from './policies.js'
 import type { TypePolicy } from './policies.js'
 import { drainProject } from './execute.js'
+import { planSession, hasRunnableTasks } from './session-planner.js'
 import type { TavernaPlugin } from '../plugin/types.js'
 import type { FeatureContext } from '../infra/feature-map.js'
 
@@ -106,6 +107,12 @@ export async function runScheduler(
       const steps = mergePolicy(typeSteps, projectPolicy)
       if (steps.filter((s) => isAtSatisfied(s.at, now)).length === 0) continue
 
+      // task dep resolution — skip projects with no runnable tasks
+      if (!hasRunnableTasks(project)) {
+        deferred({ project: project.id, reason: 'all_tasks_blocked' })
+        continue
+      }
+
       eligible.push(project)
     }
 
@@ -134,10 +141,27 @@ export async function runScheduler(
       const eligibleSteps = steps.filter((s) => isAtSatisfied(s.at, now))
 
       if (opts.dryRun) {
+        const plan = planSession(project, maxTasksPerProject)
+        const score = ranked.find((r) => r.project.id === project.id)?.score ?? '?'
         for (const step of eligibleSteps) {
+          const at = step.at ? ` at ${step.at}` : ''
           console.log(
-            `[dry-run] ${project.id} (${project.tipo}, score=${ranked.find((r) => r.project.id === project.id)?.score ?? '?'}) → ${step.agent}${step.at ? ` at ${step.at}` : ''} (${maxTasksPerProject > 1 ? `drain ≤${maxTasksPerProject}` : '1 task'})`,
+            `[dry-run] ${project.id} (${project.tipo}, score=${score}) → ${step.agent}${at}`,
           )
+          for (const t of plan.runnable) {
+            const dl = t.deadline ? `  deadline:${t.deadline}` : ''
+            console.log(`  ✓ ${t.id} [${t.prioridade}]${dl}  ${t.title}`)
+          }
+          if (plan.blocked.length > 0) {
+            for (const b of plan.blocked) {
+              console.log(`  ✗ ${b.task.id} — blocked by: ${b.blockedBy.join(', ')}`)
+            }
+          }
+          if (plan.awaitingHuman.length > 0) {
+            for (const t of plan.awaitingHuman) {
+              console.log(`  👤 ${t.id} — awaiting human`)
+            }
+          }
         }
         agentRunCount[agentId] = (agentRunCount[agentId] ?? 0) + 1
         batchCount++
