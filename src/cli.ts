@@ -19,7 +19,6 @@ import { writeActionRequest } from './inbox/action.js'
 import type { ActionUrgency } from './inbox/action.js'
 import { processInbox, MAX_CHARS_PER_RUN } from './inbox/index.js'
 import { migrate } from './migrate/index.js'
-import { runScheduler } from './pm/scheduler.js'
 import { defaultTypePolicies } from './pm/policies.js'
 
 import type { VaultAgent, VaultProject } from './vault/index.js'
@@ -577,7 +576,7 @@ program
   .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
   .option('--tipo <tipo>', 'Filter by project type: USP, BB, *')
   .action(async (projectId: string | undefined, opts: { vault?: string; tipo?: string }) => {
-    const { readProjectPolicy, mergePolicy, getTypePolicy } = await import('./pm/scheduler.js')
+    const { readProjectPolicy, mergePolicy, getTypePolicy } = await import('./pm/policies.js')
     const { computeHealth } = await import('./pm/loki.js')
     const { resolvePolicy } = await import('./pm/policy-resolver.js')
 
@@ -805,34 +804,6 @@ program
         )
       }
     }
-  })
-
-// ── schedule ──────────────────────────────────────────────────────────────────
-
-program
-  .command('schedule')
-  .description('Run the centralized scheduler daemon (replaces systemd timers)')
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--dry-run', 'Print what would run without executing agents')
-  .option('--tick-ms <ms>', 'Tick interval in milliseconds (default: 60000)', '60000')
-  .option('--once', 'Run one tick and exit')
-  .action(async (opts: { vault?: string; dryRun?: boolean; tickMs?: string; once?: boolean }) => {
-    const vaultPath = getVaultPath(opts)
-    const config = defineConfig({ vaultPath })
-
-    const typePolicies = defaultTypePolicies(config)
-
-    const tickMs = Number(opts.tickMs ?? 60_000)
-    const maxTicks = opts.once ? 1 : undefined
-
-    console.log(`Scheduler started (tick: ${tickMs}ms${opts.once ? ', one-shot' : ''})`)
-    if (opts.dryRun) console.log('Dry-run mode — no agents will execute')
-
-    await runScheduler(config, typePolicies, {
-      dryRun: opts.dryRun ?? false,
-      tickMs,
-      ...(maxTicks !== undefined ? { maxTicks } : {}),
-    })
   })
 
 // ── archive-task ──────────────────────────────────────────────────────────────
@@ -1105,131 +1076,6 @@ program
     const vaultPath = getVaultPath(opts)
     const config = defineConfig({ vaultPath })
     await createServer(config, { port: Number(opts.port ?? 2948) })
-  })
-
-// ── next ──────────────────────────────────────────────────────────────────────
-
-program
-  .command('next')
-  .description('Show next tasks to execute, ranked by project score')
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--all', 'Include projects not yet due (show full task queue)')
-  .option('--limit <n>', 'Max projects to show (default: 10)', '10')
-  .action(async (opts: { vault?: string; all?: boolean; limit?: string }) => {
-    const { isProjectDue, readProjectPolicy, mergePolicy, getTypePolicy, isAtSatisfied } =
-      await import('./pm/scheduler.js')
-    const { rankProjects } = await import('./pm/scorer.js')
-    const { isBlocked } = await import('./vault/task.js')
-    const { computeHealth } = await import('./pm/loki.js')
-    const { isRunWindowOpen } = await import('./pm/run-window.js')
-
-    const limit = Number(opts.limit ?? 10)
-    const vaultPath = getVaultPath(opts)
-    const config = defineConfig({ vaultPath })
-    const vault = await scanVault(config)
-    const typePolicies = defaultTypePolicies(config)
-    const now = new Date()
-
-    type Row = {
-      score: number
-      project: import('./vault/types.js').VaultProject
-      agentId: string
-      nextTask?: import('./vault/types.js').VaultTask
-      reason?: string // why ineligible (only when --all)
-    }
-
-    const rows: Row[] = []
-
-    for (const project of vault.projects) {
-      const agentId = (project.agent ??
-        config.agentDefaults[project.tipo] ??
-        config.agentDefaults['*'] ??
-        '') as string
-
-      if (!opts.all) {
-        // Only show eligible (due + window open + policy step satisfied)
-        if (!isProjectDue(project, now)) continue
-
-        const runWindow =
-          typeof project.raw['run_window'] === 'string'
-            ? project.raw['run_window']
-            : (config.defaultRunWindow ?? 'always')
-        const windowResult = await isRunWindowOpen(runWindow, now, config.idleThresholdMinutes)
-        if (!windowResult.open) continue
-
-        const typeSteps = getTypePolicy(project.tipo, typePolicies)
-        const projectPolicy = readProjectPolicy(project.raw)
-        const steps = mergePolicy(typeSteps, projectPolicy)
-        if (steps.filter((s) => isAtSatisfied(s.at, now)).length === 0) continue
-      }
-
-      const pending = project.tasks.filter((t) => t.progresso < 100)
-      const nextTask = pending.find((t) => {
-        const { blocked } = isBlocked(t, project.tasks)
-        return !blocked && !t.bloqueio && !(t.requerHumano && t.requerHumano.length > 0)
-      })
-
-      const [scored] = rankProjects([project], config.agentDefaults, { now })
-      if (!scored) continue
-
-      rows.push({
-        score: scored.score,
-        project,
-        agentId,
-        ...(nextTask !== undefined ? { nextTask } : {}),
-      })
-    }
-
-    rows.sort((a, b) => b.score - a.score)
-    const visible = rows.slice(0, limit)
-
-    if (visible.length === 0) {
-      console.log('  (no eligible projects with pending tasks)')
-      return
-    }
-
-    const HEALTH_ICON: Record<string, string> = {
-      ok: '🟢',
-      'at-risk': '🟡',
-      overdue: '🔴',
-      idle: '⚪',
-    }
-    const dateStr = now.toISOString().replace('T', ' ').slice(0, 16)
-    console.log(`\nNext runs — ${dateStr}${opts.all ? ' (all)' : ''}\n`)
-
-    const colW = { score: 5, project: 20, agent: 22 }
-    const header = [
-      'Score'.padStart(colW.score),
-      'Project'.padEnd(colW.project),
-      'Agent'.padEnd(colW.agent),
-      'Next task',
-    ].join('  ')
-    console.log(header)
-    console.log('─'.repeat(header.length))
-
-    for (const { score, project, agentId, nextTask } of visible) {
-      const health = computeHealth(project)
-      const icon = HEALTH_ICON[health.health] ?? '⚪'
-      const scoreStr = String(score).padStart(colW.score)
-      const projStr = (icon + ' ' + project.id).padEnd(colW.project + 2) // icon is 2 chars wide
-      const agentStr = agentId.padEnd(colW.agent)
-
-      let taskStr = '(no executable task)'
-      if (nextTask) {
-        const prio = nextTask.prioridade !== 'medium' ? ` [${nextTask.prioridade}]` : ''
-        const pct = nextTask.progresso > 0 ? ` ${nextTask.progresso}%` : ''
-        const title =
-          nextTask.title.length > 48 ? nextTask.title.slice(0, 45) + '…' : nextTask.title
-        taskStr = `${nextTask.id}${prio}${pct}  ${title}`
-      }
-
-      console.log(`${scoreStr}  ${projStr}  ${agentStr}  ${taskStr}`)
-    }
-
-    if (rows.length > limit) {
-      console.log(`\n  … e mais ${rows.length - limit} projeto(s) — use --limit para ver mais`)
-    }
-    console.log()
   })
 
 // ── mcp ───────────────────────────────────────────────────────────────────────

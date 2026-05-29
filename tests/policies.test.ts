@@ -7,7 +7,7 @@ import {
   getTypePolicy,
   type TypePolicy,
   type PolicyStep,
-} from '../src/pm/scheduler.js'
+} from '../src/pm/policies.js'
 import type { VaultProject } from '../src/vault/types.js'
 
 const baseProject: VaultProject = {
@@ -76,7 +76,10 @@ describe('mergePolicy', () => {
   })
 
   it('override: returns only project steps', () => {
-    const result = mergePolicy(typeSteps, { compose: 'override', steps: [{ agent: '@proj-agent' }] })
+    const result = mergePolicy(typeSteps, {
+      compose: 'override',
+      steps: [{ agent: '@proj-agent' }],
+    })
     expect(result).toEqual([{ agent: '@proj-agent' }])
   })
 
@@ -160,7 +163,7 @@ describe('isProjectDue', () => {
   })
 
   it('returns false before daily interval elapsed', () => {
-    const lastRun = new Date(Date.now() - 3_600_000).toISOString()  // 1h ago
+    const lastRun = new Date(Date.now() - 3_600_000).toISOString() // 1h ago
     expect(isProjectDue({ ...baseProject, lastRun }, new Date())).toBe(false)
   })
 
@@ -186,7 +189,13 @@ describe('isProjectDue', () => {
 
 describe('getTypePolicy', () => {
   const policies: TypePolicy[] = [
-    { tipo: 'USP', steps: [{ agent: '@study', at: '09:00' }, { agent: '@edisciplinas', at: 'EOD' }] },
+    {
+      tipo: 'USP',
+      steps: [
+        { agent: '@study', at: '09:00' },
+        { agent: '@edisciplinas', at: 'EOD' },
+      ],
+    },
     { tipo: 'BB', steps: [{ agent: '@planner' }] },
   ]
 
