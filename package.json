@@ -6,7 +6,7 @@
   "author": "João Victor Miranda",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dinao/taverna.git"
+    "url": "https://github.com/digrao/taverna.git"
   },
   "type": "module",
   "bin": {
