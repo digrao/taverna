@@ -309,8 +309,7 @@ export function renderDashboard(
   <h1>Taverna</h1>
   <div class="header-right">
     <a href="/flow" style="color:#8b6914;font-size:.9em;text-decoration:none;border:1px solid #3a2e14;padding:4px 10px;white-space:nowrap">Fluxo →</a>
-    <a href="/slides" style="color:#8b6914;font-size:.9em;text-decoration:none;border:1px solid #3a2e14;padding:4px 10px;white-space:nowrap">Slides →</a>
-    <a href="/infraestrutura" style="color:#8b6914;font-size:.9em;text-decoration:none;border:1px solid #3a2e14;padding:4px 10px;white-space:nowrap">Infra →</a>
+<a href="/infraestrutura" style="color:#8b6914;font-size:.9em;text-decoration:none;border:1px solid #3a2e14;padding:4px 10px;white-space:nowrap">Infra →</a>
     <span class="total-cost" id="total-cost">$${totalCost.toFixed(4)} hoje</span>
     <span class="status-bar">
       <span class="sse-dot" id="sse-dot"></span>

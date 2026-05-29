@@ -21,7 +21,7 @@
     "./config": "./dist/config.js"
   },
   "scripts": {
-    "build": "tsc && cp -r src/server/slides dist/server/",
+    "build": "tsc",
     "dev": "tsx src/cli.ts",
 "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",

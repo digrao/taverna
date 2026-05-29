@@ -19,7 +19,7 @@ npm install -g taverna
 Or from source:
 
 ```bash
-git clone https://github.com/dinao/taverna
+git clone https://github.com/digrao/taverna
 cd taverna
 npm install
 npm run build

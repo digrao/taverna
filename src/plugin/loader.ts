@@ -39,18 +39,14 @@ export async function loadPlugins(): Promise<TavernaPlugin[]> {
   return plugins
 }
 
-/**
- * Collect all FeatureDefs from a list of loaded plugins.
- */
 export function collectPluginFeatures(plugins: TavernaPlugin[]) {
   return plugins.flatMap((p) => p.features ?? [])
 }
 
-/**
- * Single entry point — load plugins and return their combined features.
- * Both the HTTP server and MCP server use this instead of duplicating
- * loadPlugins() + collectPluginFeatures() calls.
- */
+export function collectPluginRoutes(plugins: TavernaPlugin[]) {
+  return plugins.flatMap((p) => p.httpRoutes ?? [])
+}
+
 export async function loadPluginFeatures() {
   return collectPluginFeatures(await loadPlugins())
 }

@@ -1,7 +1,15 @@
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Command } from 'commander'
 import type { FeatureDef, FeatureContext } from '../infra/feature-map.js'
 import type { AgentResult } from '../pm/executor.js'
 import type { VaultProject } from '../vault/types.js'
+
+export interface HttpRoute {
+  method: 'GET' | 'POST'
+  /** Exact path or prefix ending with * (e.g. '/slides/*') */
+  path: string
+  handler: (req: IncomingMessage, res: ServerResponse, path: string) => Promise<void>
+}
 
 /**
  * A taverna plugin contributes features (MCP tools + HTTP routes), optional CLI
@@ -21,6 +29,9 @@ export interface TavernaPlugin {
 
   /** Features exposed as MCP tools and HTTP routes */
   features?: FeatureDef[]
+
+  /** Raw HTTP routes for serving non-JSON content (HTML, assets) */
+  httpRoutes?: HttpRoute[]
 
   /**
    * Optional CLI commands this plugin contributes.
