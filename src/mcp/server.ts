@@ -8,6 +8,7 @@ import { features } from '../infra/feature-map.js'
 import type { FeatureContext, FeatureDef } from '../infra/feature-map.js'
 import { loadConfig } from '../config.js'
 import { loadPluginFeatures } from '../plugin/loader.js'
+import { notificationBus } from '../notifications/bus.js'
 
 // stdout is the MCP protocol channel — never write there directly
 const log = (...args: unknown[]) => process.stderr.write(args.join(' ') + '\n')
@@ -19,6 +20,7 @@ const PROJECTS_DIR = join(VAULT_PATH, '10_Projects')
 const ctx: FeatureContext = {
   vaultPath: VAULT_PATH,
   config,
+  notificationBus,
 }
 
 function ok(data: unknown) {

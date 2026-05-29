@@ -6,6 +6,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { VaultCache } from './cache.js'
 import type { TavernaConfig } from '../config.js'
 import type { FeatureDef, FeatureContext } from '../infra/feature-map.js'
+import { notificationBus } from '../notifications/bus.js'
 import type { HttpRoute } from '../plugin/types.js'
 import { parseFrontmatter, getString } from '../vault/frontmatter.js'
 import { findBacklinks } from '../vault/backlinks.js'
@@ -28,7 +29,12 @@ export class Router {
     private pluginFeatures: FeatureDef[] = [],
     private pluginRoutes: HttpRoute[] = [],
   ) {
-    this.featureCtx = { vaultPath: config.vaultPath, config, scan: () => cache.get() }
+    this.featureCtx = {
+      vaultPath: config.vaultPath,
+      config,
+      notificationBus,
+      scan: () => cache.get(),
+    }
     cache.onRefresh = () => this.broadcast('update')
 
     // Watch /tmp/taverna-active/ and broadcast agent_active events when runs start/stop

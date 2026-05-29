@@ -14,13 +14,43 @@ import { log } from './loki.js'
 import { resolvePolicy } from './policy-resolver.js'
 import { checkBudget, recordCost, loadVaultBudgetConfig } from './budget.js'
 import type { BudgetConfig } from './budget.js'
-import {
-  formatAgentRunMessage,
-  formatActionRequiredMessage,
-  formatAgentStartMessage,
-} from './matrix.js'
-import { getNotifier } from '../notifications/index.js'
+import { notificationBus } from '../notifications/bus.js'
 import { markActive, markInactive } from './active.js'
+
+function formatAgentStartMessage(
+  project: string,
+  agent: string,
+  tmux: string,
+  session: string,
+): string {
+  return [
+    `[taverna] ▶ ${agent} iniciou ${project}`,
+    `tmux: tmux attach -t ${tmux}`,
+    `session: ${session}`,
+  ].join('\n')
+}
+
+function formatAgentRunMessage(
+  project: string,
+  agent: string,
+  resultado?: string,
+  session?: string,
+): string {
+  const lines = [`[taverna] ✓ ${agent} concluiu ${project}`, resultado ?? '(sem RESULTADO)']
+  if (session) lines.push(`session: ${session}`)
+  return lines.join('\n')
+}
+
+function formatActionRequiredMessage(
+  project: string,
+  agent: string,
+  action: string,
+  session?: string,
+): string {
+  const lines = [`[taverna] ⚠ ${agent} aguarda input em ${project}`, action]
+  if (session) lines.push(`Retomar: claude --resume ${session}`)
+  return lines.join('\n')
+}
 
 export interface ExecutorOptions {
   maxContextChars?: number
@@ -291,7 +321,7 @@ export async function runSession(
     tmuxSession: sessionName,
   })
 
-  getNotifier()
+  notificationBus
     .send({
       text: formatAgentStartMessage(projectLabel, agentLabel, sessionName, sessionId),
       urgency: 'info',
@@ -376,7 +406,7 @@ export async function runSession(
     const notifyMsg = actionRequired
       ? formatActionRequiredMessage(projectLabel, agentLabel, actionRequired, sessionId)
       : formatAgentRunMessage(projectLabel, agentLabel, resultado, sessionId)
-    getNotifier()
+    notificationBus
       .send({
         text: notifyMsg,
         urgency: actionRequired ? 'critical' : 'info',
@@ -569,7 +599,7 @@ export async function runAgent(
     startedAt: new Date().toISOString(),
     tmuxSession: sessionName,
   })
-  getNotifier()
+  notificationBus
     .send({
       text: formatAgentStartMessage(projectLabel, agentLabel, sessionName, sessionId),
       urgency: 'info',
@@ -654,7 +684,7 @@ export async function runAgent(
     const sessionMsg = actionRequired
       ? formatActionRequiredMessage(projectLabel, agentLabel, actionRequired, sessionId)
       : formatAgentRunMessage(projectLabel, agentLabel, resultado, sessionId)
-    getNotifier()
+    notificationBus
       .send({
         text: sessionMsg,
         urgency: actionRequired ? 'critical' : 'info',

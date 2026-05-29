@@ -1,4 +1,5 @@
 import type { TavernaPlugin } from './types.js'
+import { notificationBus } from '../notifications/bus.js'
 
 /**
  * Discovers and loads plugins from TAVERNA_PLUGINS env var.
@@ -27,6 +28,7 @@ export async function loadPlugins(): Promise<TavernaPlugin[]> {
         process.stderr.write(`[plugin] ${pluginPath}: missing default export with name field\n`)
         continue
       }
+      plugin.onLoad?.(notificationBus)
       plugins.push(plugin)
       process.stderr.write(`[plugin] loaded: ${plugin.name}\n`)
     } catch (e) {

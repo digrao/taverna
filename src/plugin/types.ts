@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Command } from 'commander'
 import type { FeatureDef, FeatureContext } from '../infra/feature-map.js'
+import type { NotificationBus } from '../notifications/bus.js'
 import type { AgentResult } from '../pm/executor.js'
 import type { VaultProject } from '../vault/types.js'
 
@@ -32,6 +33,12 @@ export interface TavernaPlugin {
 
   /** Raw HTTP routes for serving non-JSON content (HTML, assets) */
   httpRoutes?: HttpRoute[]
+
+  /**
+   * Called once when the plugin is loaded, before any tick or command.
+   * Use to register notifiers, side-effects, or one-time setup.
+   */
+  onLoad?: (bus: NotificationBus) => void
 
   /**
    * Optional CLI commands this plugin contributes.

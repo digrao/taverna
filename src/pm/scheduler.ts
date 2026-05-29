@@ -17,6 +17,7 @@ import { drainProject } from './execute.js'
 import { planSession, hasRunnableTasks } from './session-planner.js'
 import type { TavernaPlugin } from '../plugin/types.js'
 import type { FeatureContext } from '../infra/feature-map.js'
+import { notificationBus } from '../notifications/bus.js'
 
 export interface SchedulerOptions {
   dryRun?: boolean
@@ -46,7 +47,7 @@ export async function runScheduler(
   const runBatchSize = opts.runBatchSize ?? Infinity
   const maxConcurrentPerAgent = opts.maxConcurrentPerAgent ?? {}
 
-  const ctx: FeatureContext = { vaultPath: config.vaultPath, config }
+  const ctx: FeatureContext = { vaultPath: config.vaultPath, config, notificationBus }
   const now = new Date()
 
   // ── Plugin beforeWork ──────────────────────────────────────────────────

@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process'
 import { z } from 'zod'
 import type { TavernaConfig } from '../config.js'
 import type { VaultState } from '../vault/types.js'
+import type { NotificationBus } from '../notifications/bus.js'
 import { scanVault } from '../vault/index.js'
 import { computeHealth } from '../pm/loki.js'
 import { getDailyCosts, loadVaultBudgetConfig, getBudgetStatus } from '../pm/budget.js'
@@ -16,6 +17,7 @@ import { parseFrontmatter, getString } from '../vault/frontmatter.js'
 export interface FeatureContext {
   vaultPath: string
   config: TavernaConfig
+  notificationBus: NotificationBus
   // Optional cached scanner — HTTP server passes cache.get, MCP calls scanVault directly
   scan?: () => Promise<VaultState>
 }

@@ -18,7 +18,8 @@
     "./plugin": "./dist/plugin/types.js",
     "./infra": "./dist/infra/feature-map.js",
     "./inbox": "./dist/inbox/index.js",
-    "./config": "./dist/config.js"
+    "./config": "./dist/config.js",
+    "./notifications": "./dist/notifications/index.js"
   },
   "scripts": {
     "build": "tsc",
