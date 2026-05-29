@@ -1,9 +1,11 @@
 import type { Command } from 'commander'
 import type { FeatureDef, FeatureContext } from '../infra/feature-map.js'
+import type { AgentResult } from '../pm/executor.js'
+import type { VaultProject } from '../vault/types.js'
 
 /**
- * A taverna plugin contributes features (MCP tools + HTTP routes) and optionally
- * CLI commands. Plugins are discovered via the TAVERNA_PLUGINS env var.
+ * A taverna plugin contributes features (MCP tools + HTTP routes), optional CLI
+ * commands, and optional scheduler lifecycle hooks.
  *
  * Minimal plugin example:
  *
@@ -25,4 +27,16 @@ export interface TavernaPlugin {
    * Called with the root Commander program so the plugin can attach subcommands.
    */
   registerCommands?: (program: Command, ctx: FeatureContext) => void
+
+  /**
+   * Called once at the start of each scheduler tick, before vault scan.
+   * Use for pre-tick sync work (e.g. clockify hours → project frontmatters).
+   */
+  beforeTick?: (ctx: FeatureContext) => Promise<void>
+
+  /**
+   * Called after each agent run completes (not called in dry-run mode).
+   * Use for post-run side effects (e.g. asset uploads, telemetry).
+   */
+  afterRun?: (result: AgentResult, project: VaultProject, ctx: FeatureContext) => Promise<void>
 }

@@ -5,24 +5,18 @@ import { createRequire } from 'node:module'
 const _req = createRequire(import.meta.url)
 const { version: _version } = _req('../package.json') as { version: string }
 import { defineConfig, resolveVaultPath } from './config.js'
-import {
-  scanVault,
-  appendLogbook,
-  appendProjectLogbook,
-  updateProjectStatus,
-  readProject,
-} from './vault/index.js'
-import { runAgent, runPipeline, runSession } from './pm/executor.js'
-import { snapshot, computeHealth } from './pm/loki.js'
+import { scanVault, updateProjectStatus, appendLogbook } from './vault/index.js'
+import { runPipeline, runSession } from './pm/executor.js'
+import { snapshot } from './pm/loki.js'
 import { emitEvent } from './pm/event-bus.js'
-import { writeActionRequest } from './inbox/action.js'
-import type { ActionUrgency } from './inbox/action.js'
 import { processInbox, MAX_CHARS_PER_RUN } from './inbox/index.js'
 import { migrate } from './migrate/index.js'
 import { defaultTypePolicies } from './pm/policies.js'
+import { drainProject } from './pm/execute.js'
+import { runScheduler } from './pm/scheduler.js'
+import { loadPlugins } from './plugin/loader.js'
 
-import type { VaultAgent, VaultProject } from './vault/index.js'
-import type { TavernaConfig } from './config.js'
+import type { VaultAgent } from './vault/index.js'
 import type { ExecutorOptions } from './pm/executor.js'
 
 function getVaultPath(opts: { vault?: string }): string {
@@ -31,123 +25,6 @@ function getVaultPath(opts: { vault?: string }): string {
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e))
     process.exit(1)
-  }
-}
-
-async function runOnce(
-  agent: VaultAgent,
-  project: VaultProject,
-  runOpts: ExecutorOptions,
-  config: TavernaConfig,
-  dryRun: boolean,
-): Promise<{ success: boolean }> {
-  const result = await runAgent(agent, project, { ...runOpts, vaultPath: config.vaultPath })
-
-  if (dryRun) {
-    console.log(result.output)
-    return { success: true }
-  }
-
-  // Only advance lastRun on success — failures retry on the next cycle
-  await updateProjectStatus(project.filePath, {
-    ...(result.success ? { lastRun: new Date().toISOString() } : {}),
-    lastStatus: result.success ? 'success' : 'failed',
-    runsTotal: project.runsTotal + 1,
-  })
-  await appendLogbook(
-    agent.id,
-    {
-      projectName: project.id,
-      content: [
-        `**Success:** ${result.success}`,
-        `**Duration:** ${(result.durationMs / 1000).toFixed(1)}s`,
-        ...(result.resultado ? [`**Resultado:** ${result.resultado}`] : []),
-        ...(result.error ? [`**Error:** ${result.error}`] : []),
-      ].join('\n'),
-      success: result.success,
-      duration: result.durationMs / 1000,
-    },
-    config,
-  )
-
-  snapshot(project)
-
-  // Per-project logbook (task 04)
-  if (project.folderPath) {
-    await appendProjectLogbook(project.folderPath, {
-      projectName: project.id,
-      content: [
-        `**Agent:** ${agent.id}`,
-        `**Success:** ${result.success}`,
-        `**Duration:** ${(result.durationMs / 1000).toFixed(1)}s`,
-        ...(result.resultado ? [`**Resultado:** ${result.resultado}`] : []),
-        ...(result.error ? [`**Error:** ${result.error}`] : []),
-      ].join('\n'),
-      success: result.success,
-      duration: result.durationMs / 1000,
-    })
-  }
-
-  // Inbox notification when human action is needed (task 03)
-  if (!dryRun) {
-    const blockedTasks = project.tasks.filter(
-      (t) => t.bloqueio || (t.requerHumano && t.requerHumano.length > 0),
-    )
-    const snap = computeHealth(project)
-
-    if (result.actionRequired) {
-      await writeActionRequest(config.vaultPath, {
-        projeto: project.id,
-        agente: agent.id,
-        urgencia: 'high',
-        oQueAconteceu: result.actionRequired,
-        acoes: ['Resolver o bloqueio indicado pelo agente e rodar novamente'],
-        contexto: result.output,
-      })
-    } else if (blockedTasks.length > 0) {
-      const urgencia: ActionUrgency =
-        snap.health === 'overdue' || blockedTasks.some((t) => t.bloqueio) ? 'high' : 'medium'
-      const acoes = blockedTasks.flatMap((t) => [
-        ...(t.bloqueio ? [`[${t.id}] Resolver bloqueio: ${t.bloqueioDetalhe ?? t.bloqueio}`] : []),
-        ...(t.requerHumano ?? []).map((a) => `[${t.id}] ${a}`),
-      ])
-      await writeActionRequest(config.vaultPath, {
-        projeto: project.id,
-        agente: agent.id,
-        urgencia,
-        oQueAconteceu: `${blockedTasks.length} task(s) aguardando ação humana`,
-        acoes,
-      })
-    }
-  }
-
-  console.log(result.success ? `  done (${result.durationMs}ms)` : `  failed: ${result.error}`)
-  if (result.resultado) console.log(`  RESULTADO: ${result.resultado}`)
-  return { success: result.success }
-}
-
-// Runs up to maxTasks agent iterations on a project, re-reading state between each.
-async function drainProject(
-  agent: VaultAgent,
-  project: VaultProject,
-  maxTasks: number,
-  runOpts: ExecutorOptions,
-  config: TavernaConfig,
-  dryRun: boolean,
-): Promise<void> {
-  let current = project
-  for (let i = 0; i < maxTasks; i++) {
-    const pending = current.tasks.filter((t) => t.progresso < 100)
-    if (pending.length === 0) {
-      console.log(`  no pending tasks remaining`)
-      break
-    }
-    if (maxTasks > 1) console.log(`  [${i + 1}/${maxTasks}] ${pending[0]!.id}`)
-    const { success } = await runOnce(agent, current, runOpts, config, dryRun)
-    if (!success || dryRun) break
-    if (i < maxTasks - 1) {
-      current = await readProject(current.filePath, config.uspFolderPrefixes)
-    }
   }
 }
 
@@ -440,54 +317,55 @@ sessionCmd
 
 program
   .command('execute')
-  .description('Run agents on all eligible projects')
+  .description('Run agents on all eligible projects (one scheduler tick)')
   .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
   .option('--dry-run', 'Print prompts without executing')
-  .option('--drain', 'Run tasks sequentially per project until done or --max-tasks is reached')
-  .option('--max-tasks <n>', 'Max tasks per project per drain session (default: 3)', '3')
+  .option('--drain', 'Run tasks sequentially per project until done')
+  .option('--max-tasks <n>', 'Max tasks per project (default: 3)', '3')
   .action(
     async (opts: { vault?: string; dryRun?: boolean; drain?: boolean; maxTasks?: string }) => {
       const vaultPath = getVaultPath(opts)
       const config = defineConfig({ vaultPath })
-      const vault = await scanVault(config)
-
-      const now = Date.now()
-      const freqMs: Record<string, number> = {
-        hourly: 3_600_000,
-        daily: 86_400_000,
-        weekly: 604_800_000,
-        monthly: 2_592_000_000,
-      }
-
-      const eligible = vault.projects.filter((p) => {
-        if (!p.agent || p.runEvery === 'never') return false
-        if (!p.lastRun) return true
-        const freq = freqMs[p.runEvery]
-        if (!freq) return false
-        return now - new Date(p.lastRun).getTime() >= freq
+      const plugins = await loadPlugins()
+      const typePolicies = defaultTypePolicies(config)
+      await runScheduler(config, typePolicies, plugins, {
+        ...(opts.dryRun !== undefined ? { dryRun: opts.dryRun } : {}),
+        maxTicks: 1,
+        maxTasksPerProject: opts.drain ? Number(opts.maxTasks ?? 3) : 1,
       })
+    },
+  )
 
-      if (eligible.length === 0) {
-        console.log('No eligible projects.')
-        return
-      }
+// ── schedule ──────────────────────────────────────────────────────────────────
 
-      const maxTasks = opts.drain ? Number(opts.maxTasks ?? 3) : 1
-
-      for (const project of eligible) {
-        const resolvedAgentName = project.agent ?? config.agentDefaults[project.tipo]
-        const agent = vault.agents.find(
-          (a) => a.id === resolvedAgentName || a.folderName === resolvedAgentName,
-        )
-        if (!agent) {
-          console.error(`  skip ${project.id}: agent ${resolvedAgentName} not found`)
-          continue
-        }
-        console.log(
-          `\n${project.id} → ${agent.id}${maxTasks > 1 ? ` (drain ≤${maxTasks} tasks)` : ''}`,
-        )
-        await drainProject(agent, project, maxTasks, {}, config, opts.dryRun ?? false)
-      }
+program
+  .command('schedule')
+  .description('Run the scheduler daemon (continuous tick loop, default: 60s)')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .option('--dry-run', 'Print what would run without executing')
+  .option('--once', 'Run a single tick and exit')
+  .option('--tick-ms <n>', 'Tick interval in ms (default: 60000)')
+  .option('--drain', 'Run tasks sequentially per project until done')
+  .option('--max-tasks <n>', 'Max tasks per project in drain mode (default: 3)', '3')
+  .action(
+    async (opts: {
+      vault?: string
+      dryRun?: boolean
+      once?: boolean
+      tickMs?: string
+      drain?: boolean
+      maxTasks?: string
+    }) => {
+      const vaultPath = getVaultPath(opts)
+      const config = defineConfig({ vaultPath })
+      const plugins = await loadPlugins()
+      const typePolicies = defaultTypePolicies(config)
+      await runScheduler(config, typePolicies, plugins, {
+        ...(opts.dryRun !== undefined ? { dryRun: opts.dryRun } : {}),
+        ...(opts.once ? { maxTicks: 1 } : {}),
+        ...(opts.tickMs ? { tickMs: Number(opts.tickMs) } : {}),
+        maxTasksPerProject: opts.drain ? Number(opts.maxTasks ?? 3) : 1,
+      })
     },
   )
 
