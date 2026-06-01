@@ -8,7 +8,7 @@ on:
 
 jobs:
   pipeline:
-    uses: jvcm-infra/workflows/.github/workflows/cli-ts.yml@main
+    uses: digrao/workflows/.github/workflows/cli-ts.yml@main
     with:
       app: taverna
       pre_install: "ln -sf $HOME/tools/neo-matrix $(dirname $GITHUB_WORKSPACE)/neo-matrix"
