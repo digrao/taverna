@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, writeFile, rename, mkdir } from 'node:fs/promises'
 import { join, dirname, basename } from 'node:path'
 import matter from 'gray-matter'
 
@@ -21,7 +21,9 @@ export async function markTasksInProgress(
       parsed.data['_session_id'] = sessionId
       parsed.data['_session_started'] = new Date().toISOString()
       await writeFile(filePath, matter.stringify(parsed.content, parsed.data), 'utf8')
-    } catch { /* non-fatal */ }
+    } catch {
+      /* non-fatal */
+    }
   }
 }
 
@@ -38,17 +40,44 @@ export async function updateCompletedTaskSessionId(
         const raw = await readFile(path, 'utf8')
         const parsed = matter(raw)
         const progresso = parsed.data['progresso'] ?? parsed.data['progress']
-        const done = typeof progresso === 'number'
-          ? progresso >= 100
-          : typeof progresso === 'string' && parseInt(progresso, 10) >= 100
+        const done =
+          typeof progresso === 'number'
+            ? progresso >= 100
+            : typeof progresso === 'string' && parseInt(progresso, 10) >= 100
         if (done) {
           parsed.data['_session_id'] = sessionId
           await writeFile(path, matter.stringify(parsed.content, parsed.data), 'utf8')
           updated = true
         }
-      } catch { /* file missing or unreadable */ }
+      } catch {
+        /* file missing or unreadable */
+      }
     }
   }
+}
+
+export async function archiveCompletedTasks(taskPaths: string[]): Promise<string[]> {
+  const archived: string[] = []
+  for (const filePath of taskPaths) {
+    try {
+      const raw = await readFile(filePath, 'utf8')
+      const parsed = matter(raw)
+      const progresso = parsed.data['progresso'] ?? parsed.data['progress']
+      const done =
+        typeof progresso === 'number'
+          ? progresso >= 100
+          : typeof progresso === 'string' && parseInt(progresso, 10) >= 100
+      if (done) {
+        const archiveDir = join(dirname(filePath), 'archive')
+        await mkdir(archiveDir, { recursive: true })
+        await rename(filePath, join(archiveDir, basename(filePath)))
+        archived.push(filePath)
+      }
+    } catch {
+      /* non-fatal */
+    }
+  }
+  return archived
 }
 
 export async function updateProjectStatus(

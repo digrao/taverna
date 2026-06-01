@@ -40,6 +40,25 @@ export function renderRunPage(projectId: string, publicUrl?: string): string {
       line-height: 1.5; color: #c9d1d9; font-size: 12px;
     }
 
+    #task-selector { display: flex; flex-direction: column; gap: .25rem; }
+    .task-item {
+      display: flex; align-items: flex-start; gap: .5rem;
+      background: #161b22; border: 1px solid #21262d; border-radius: 4px;
+      padding: .35rem .6rem; font-size: 11px; color: #8b949e; cursor: pointer;
+    }
+    .task-item:hover { border-color: #30363d; }
+    .task-item input[type="checkbox"] { margin-top: 1px; flex-shrink: 0; accent-color: #3fb950; }
+    .task-item .t-id { color: #58a6ff; font-weight: 600; flex-shrink: 0; }
+    .task-item .t-title { color: #e6edf3; flex: 1; }
+    .task-item .t-pri { flex-shrink: 0; }
+    .pri-high { color: #f85149; }
+    .pri-medium { color: #e3b341; }
+    .pri-low { color: #3fb950; }
+    .task-controls { display: flex; gap: .4rem; font-size: 11px; }
+    .task-controls button { background: none; border: none; color: #58a6ff; cursor: pointer; padding: 0; }
+    .task-controls button:hover { text-decoration: underline; }
+    #no-tasks { font-size: 11px; color: #8b949e; }
+
     .actions { display: flex; gap: .5rem; align-items: center; }
     button.run-btn {
       background: #238636; color: #fff; border: none; padding: .4rem .9rem;
@@ -85,6 +104,18 @@ export function renderRunPage(projectId: string, publicUrl?: string): string {
   <div class="meta-row" id="meta">
     <span>projeto: <strong>${projectId}</strong></span>
   </div>
+
+  <div style="display:flex;flex-direction:column;gap:.4rem">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.05em">Tasks</span>
+      <div class="task-controls">
+        <button onclick="selectAll(true)">todas</button>
+        <button onclick="selectAll(false)">nenhuma</button>
+      </div>
+    </div>
+    <div id="task-selector"><span id="no-tasks" style="font-size:11px;color:#8b949e">carregando tasks...</span></div>
+  </div>
+
   <pre id="log">aguardando execução...</pre>
   <div class="actions">
     <button class="run-btn" id="btn-run" onclick="startSession()">▶ Iniciar sessão</button>
@@ -104,6 +135,46 @@ export function renderRunPage(projectId: string, publicUrl?: string): string {
 <script>
   const PROJECT = ${escapedId}
   const BASE_URL = ${JSON.stringify(baseUrl)}
+
+  // ── Task selector ─────────────────────────────────────────────────────────
+  let taskData = []
+
+  async function loadTasks() {
+    try {
+      const r = await fetch('/api/session/preview?project=' + encodeURIComponent(PROJECT))
+      const d = await r.json()
+      const group = (d.projects ?? []).find((p) => p.project === PROJECT)
+      taskData = group ? group.tasks : []
+    } catch {
+      taskData = []
+    }
+    renderTasks()
+  }
+
+  function renderTasks() {
+    const container = document.getElementById('task-selector')
+    if (!taskData.length) {
+      container.innerHTML = '<span id="no-tasks">nenhuma task pendente desbloqueada</span>'
+      return
+    }
+    container.innerHTML = taskData.map((t) => {
+      const priClass = t.prioridade === 'high' ? 'pri-high' : t.prioridade === 'low' ? 'pri-low' : 'pri-medium'
+      return '<label class="task-item">'
+        + '<input type="checkbox" class="task-cb" value="' + t.id + '" checked>'
+        + '<span class="t-id">' + t.id + '</span>'
+        + '<span class="t-title">' + t.title + '</span>'
+        + '<span class="t-pri ' + priClass + '">' + (t.prioridade ?? '') + '</span>'
+        + '</label>'
+    }).join('')
+  }
+
+  function selectedTaskIds() {
+    return Array.from(document.querySelectorAll('.task-cb:checked')).map((cb) => cb.value)
+  }
+
+  function selectAll(checked) {
+    document.querySelectorAll('.task-cb').forEach((cb) => { cb.checked = checked })
+  }
 
   // ── SSE ──────────────────────────────────────────────────────────────────
   let es = null
@@ -141,6 +212,7 @@ export function renderRunPage(projectId: string, publicUrl?: string): string {
     es.addEventListener('agent_done', () => {
       setBadge('done', '✓ concluído')
       document.getElementById('btn-run').disabled = false
+      loadTasks()
     })
 
     es.onerror = () => {
@@ -150,13 +222,18 @@ export function renderRunPage(projectId: string, publicUrl?: string): string {
 
   // ── Actions ───────────────────────────────────────────────────────────────
   async function startSession() {
+    const ids = selectedTaskIds()
+    if (!ids.length) {
+      alert('Selecione ao menos uma task para executar.')
+      return
+    }
     document.getElementById('btn-run').disabled = true
     document.getElementById('log').textContent = 'iniciando sessão...'
     setBadge('running', '▶ iniciando')
     await fetch('/api/session/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: PROJECT }),
+      body: JSON.stringify({ project: PROJECT, tasks: ids.join(',') }),
     })
   }
 
@@ -228,6 +305,7 @@ export function renderRunPage(projectId: string, publicUrl?: string): string {
     })
   })
 
+  loadTasks()
   connectSSE()
 </script>
 </body>

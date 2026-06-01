@@ -5,7 +5,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { VaultAgent, VaultProject, VaultTask } from '../vault/types.js'
 import { isBlocked, hasCycle } from '../vault/task.js'
-import { updateCompletedTaskSessionId, markTasksInProgress } from '../vault/update.js'
+import {
+  updateCompletedTaskSessionId,
+  markTasksInProgress,
+  archiveCompletedTasks,
+} from '../vault/update.js'
 import { buildPrompt, buildSessionPrompt, detectStudyMode } from './prompt.js'
 import { savePromptSnapshot } from './prompt-store.js'
 import { writeLogtaskFile } from './session.js'
@@ -396,6 +400,7 @@ export async function runSession(
     const actionRequired = parseActionRequired(text)
 
     await updateCompletedTaskSessionId(taskPaths, sessionId)
+    await archiveCompletedTasks(taskPaths)
 
     const cost_usd = usage
       ? Math.round(

@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { writeFile, rm, mkdir, readFile } from 'node:fs/promises'
+import { writeFile, rm, mkdir, readFile, access } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import matter from 'gray-matter'
-import { updateCompletedTaskSessionId } from '../src/vault/update.js'
+import { updateCompletedTaskSessionId, archiveCompletedTasks } from '../src/vault/update.js'
 
 let tmp: string
 
@@ -65,5 +65,50 @@ describe('updateCompletedTaskSessionId', () => {
     await updateCompletedTaskSessionId([done, pending], 'test-uuid-6')
     expect(await readSessionId(done)).toBe('test-uuid-6')
     expect(await readSessionId(pending)).toBeUndefined()
+  })
+})
+
+async function fileExists(p: string): Promise<boolean> {
+  try {
+    await access(p)
+    return true
+  } catch {
+    return false
+  }
+}
+
+describe('archiveCompletedTasks', () => {
+  it('moves a completed task to archive/', async () => {
+    const path = await writeTask('task-x.md', 100)
+    const archived = await archiveCompletedTasks([path])
+    expect(archived).toContain(path)
+    expect(await fileExists(path)).toBe(false)
+    expect(await fileExists(join(tmp, 'archive', 'task-x.md'))).toBe(true)
+  })
+
+  it('leaves incomplete tasks in place', async () => {
+    const path = await writeTask('task-y.md', 50)
+    const archived = await archiveCompletedTasks([path])
+    expect(archived).toHaveLength(0)
+    expect(await fileExists(path)).toBe(true)
+  })
+
+  it('creates archive/ dir if missing', async () => {
+    const subDir = join(tmp, 'sub')
+    await mkdir(subDir, { recursive: true })
+    const path = join(subDir, 'task-z.md')
+    await writeFile(path, '---\nprogresso: 100\n---\n', 'utf8')
+    const archived = await archiveCompletedTasks([path])
+    expect(archived).toContain(path)
+    expect(await fileExists(join(subDir, 'archive', 'task-z.md'))).toBe(true)
+  })
+
+  it('handles empty list without error', async () => {
+    await expect(archiveCompletedTasks([])).resolves.toEqual([])
+  })
+
+  it('is non-fatal for missing files', async () => {
+    const missing = join(tmp, 'ghost.md')
+    await expect(archiveCompletedTasks([missing])).resolves.toEqual([])
   })
 })
