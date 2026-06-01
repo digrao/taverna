@@ -13,7 +13,7 @@ const MODE_MAP: Record<string, string> = {
   triagem: 'triagem.md',
 }
 
-function detectStudyMode(task: VaultTask | undefined): string {
+export function detectStudyMode(task: VaultTask | undefined): string {
   if (!task) return 'triagem'
   const text = (task.title + ' ' + task.body).toLowerCase()
   if (/\.vhd\b|ghdl|vhdl/.test(text)) return 'vhdl'

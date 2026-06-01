@@ -1,23 +1,39 @@
-import { readdir, readFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { existsSync } from 'node:fs'
-import { spawn } from 'node:child_process'
+import { readFileSync, existsSync, statSync, watch } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { VaultCache } from './cache.js'
 import type { TavernaConfig } from '../config.js'
 import type { FeatureDef, FeatureContext } from '../infra/feature-map.js'
+import { features } from '../infra/feature-map.js'
 import { notificationBus } from '../notifications/bus.js'
 import type { HttpRoute } from '../plugin/types.js'
-import { parseFrontmatter, getString } from '../vault/frontmatter.js'
-import { findBacklinks } from '../vault/backlinks.js'
-import { watch } from 'node:fs'
-import { getDailyCosts, loadVaultBudgetConfig, getBudgetStatus } from '../pm/budget.js'
-import { computeHealth } from '../pm/loki.js'
+import { getDailyCosts } from '../pm/budget.js'
 import { getActiveRuns, activeDir } from '../pm/active.js'
 import { renderDashboard } from './dashboard.js'
 import { renderFlow } from './flow.js'
+import { renderRunPage } from './run-view.js'
 
 type SSEClient = ServerResponse
+type SendFn = (type: string, data: unknown) => boolean
+
+// ── Path matching ────────────────────────────────────────────────────────────
+// Supports :param segments: matchPath('/projects/:id', '/projects/foo') → { id: 'foo' }
+function matchPath(pattern: string, actual: string): Record<string, string> | null {
+  const pp = pattern.split('/')
+  const ap = actual.split('/')
+  if (pp.length !== ap.length) return null
+  const params: Record<string, string> = {}
+  for (let i = 0; i < pp.length; i++) {
+    const seg = pp.at(i)
+    const act = ap.at(i)
+    if (seg === undefined || act === undefined) return null
+    if (seg.startsWith(':')) {
+      params[seg.slice(1)] = decodeURIComponent(act)
+    } else if (seg !== act) {
+      return null
+    }
+  }
+  return params
+}
 
 export class Router {
   private sseClients = new Set<SSEClient>()
@@ -37,7 +53,7 @@ export class Router {
     }
     cache.onRefresh = () => this.broadcast('update')
 
-    // Watch /tmp/taverna-active/ and broadcast agent_active events when runs start/stop
+    // Broadcast agent_active events when runs start/stop
     try {
       watch(activeDir(), () => {
         const runs = getActiveRuns()
@@ -75,189 +91,6 @@ export class Router {
     }
   }
 
-  async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const url = new URL(req.url ?? '/', `http://localhost`)
-    const path = url.pathname
-    const method = req.method ?? 'GET'
-
-    if (path === '/dashboard') return this.handleDashboard(req, res)
-    if (path === '/flow') return this.handleFlow(req, res)
-    if (path === '/api/active') return this.handleApiActive(req, res)
-    if (path === '/api/state') return this.handleApiState(req, res)
-    if (path === '/api/costs') return this.handleApiCosts(req, res)
-    if (path === '/api/budget') return this.handleApiBudget(req, res)
-    if (method === 'POST' && path === '/api/run') return this.handleRun(req, res, [])
-    if (method === 'POST' && path === '/api/drain') return this.handleRun(req, res, ['--drain'])
-    if (method === 'POST' && path.startsWith('/api/run/')) {
-      return this.handleRun(req, res, ['--project', decodeURIComponent(path.slice(9))])
-    }
-    if (method === 'GET' && path === '/api/session/preview')
-      return this.handleSessionPreview(req, res, url)
-    if (method === 'POST' && path === '/api/session/run') return this.handleSessionRun(req, res)
-    if (path === '/status') return this.handleStatus(req, res)
-    if (path === '/projects') return this.handleProjects(req, res)
-    if (path.startsWith('/projects/')) return this.handleProject(req, res, path.slice(10))
-    if (path === '/agents') return this.handleAgents(req, res)
-    if (path === '/events') return this.handleSSE(req, res)
-    if (path === '/inbox') return this.handleInbox(req, res)
-    if (path === '/backlinks') return this.handleBacklinks(req, res, url)
-
-    // Plugin JSON features
-    const pluginFeature = this.pluginFeatures.find(
-      (f) => f.httpMethod === method && f.httpPath === path,
-    )
-    if (pluginFeature) return this.handlePluginFeature(req, res, pluginFeature)
-
-    // Plugin raw HTTP routes (HTML, assets, etc.)
-    const pluginRoute = this.pluginRoutes.find((r) => {
-      if (r.method !== method) return false
-      return r.path.endsWith('*') ? path.startsWith(r.path.slice(0, -1)) : path === r.path
-    })
-    if (pluginRoute) return pluginRoute.handler(req, res, path)
-
-    this.json(res, { error: 'not found' }, 404)
-  }
-
-  private async handlePluginFeature(
-    req: IncomingMessage,
-    res: ServerResponse,
-    feature: FeatureDef,
-  ): Promise<void> {
-    const params =
-      feature.httpMethod === 'POST' ? ((await this.readBody(req)) as Record<string, unknown>) : {}
-    try {
-      const result = await feature.handler(params, this.featureCtx)
-      this.json(res, result)
-    } catch (e) {
-      this.json(res, { error: e instanceof Error ? e.message : String(e) }, 500)
-    }
-  }
-
-  private async handleStatus(_req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const state = await this.cache.get()
-    this.json(res, {
-      scannedAt: state.scannedAt,
-      projects: state.projects.length,
-      agents: state.agents.length,
-      vaultPath: state.vaultPath,
-      sseClients: this.sseClients.size,
-    })
-  }
-
-  private async handleProjects(_req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const state = await this.cache.get()
-    this.json(res, state.projects)
-  }
-
-  private async handleProject(
-    _req: IncomingMessage,
-    res: ServerResponse,
-    id: string,
-  ): Promise<void> {
-    const state = await this.cache.get()
-    const project = state.projects.find((p) => p.id === id || p.name === id)
-    if (!project) return this.json(res, { error: `project "${id}" not found` }, 404)
-    this.json(res, project)
-  }
-
-  private async handleAgents(_req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const state = await this.cache.get()
-    this.json(
-      res,
-      state.agents.map((a) => ({
-        id: a.id,
-        folderName: a.folderName,
-        description: a.description,
-        runner: a.runner,
-      })),
-    )
-  }
-
-  private handleSSE(req: IncomingMessage, res: ServerResponse): void {
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
-    })
-    res.write(`event: connected\ndata: ${new Date().toISOString()}\n\n`)
-    this.sseClients.add(res)
-    req.on('close', () => this.sseClients.delete(res))
-  }
-
-  private async handleBacklinks(
-    _req: IncomingMessage,
-    res: ServerResponse,
-    url: URL,
-  ): Promise<void> {
-    const note = url.searchParams.get('note')
-    if (!note) return this.json(res, { error: 'missing ?note= parameter' }, 400)
-    const notePath = note.startsWith('/') ? note : join(this.config.vaultPath, note)
-    const results = await findBacklinks(this.config.vaultPath, notePath)
-    this.json(res, { note, count: results.length, backlinks: results })
-  }
-
-  private async handleDashboard(_req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const state = await this.cache.get()
-    const costs = getDailyCosts(this.config.vaultPath)
-    const html = renderDashboard(state.projects, costs)
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-    res.end(html)
-  }
-
-  private handleApiActive(_req: IncomingMessage, res: ServerResponse): void {
-    this.json(res, getActiveRuns())
-  }
-
-  private async handleFlow(_req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const state = await this.cache.get()
-    const html = renderFlow(state.projects)
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-    res.end(html)
-  }
-
-  private async handleApiState(_req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const state = await this.cache.get()
-    const costs = getDailyCosts(this.config.vaultPath)
-    const projects = state.projects.map((p) => ({
-      ...p,
-      health: computeHealth(p),
-      cost_today: costs[p.id] ?? 0,
-    }))
-    this.json(res, { scannedAt: state.scannedAt, projects, costs })
-  }
-
-  private handleApiCosts(_req: IncomingMessage, res: ServerResponse): void {
-    const costs = getDailyCosts(this.config.vaultPath)
-    const total = Object.values(costs).reduce((s, v) => s + v, 0)
-    this.json(res, { date: new Date().toISOString().slice(0, 10), costs, total })
-  }
-
-  private handleApiBudget(_req: IncomingMessage, res: ServerResponse): void {
-    const globalConfig = loadVaultBudgetConfig(this.config.vaultPath)
-    const status = getBudgetStatus(this.config.vaultPath, globalConfig)
-    this.json(res, status)
-  }
-
-  private handleRun(_req: IncomingMessage, res: ServerResponse, extraArgs: string[]): void {
-    const subcommand = extraArgs.includes('--project') ? 'run' : 'execute'
-    const cmd = ['taverna', subcommand, ...extraArgs]
-      .map((a) => `'${a.replace(/'/g, "'\\''")}'`)
-      .join(' ')
-    const proc = spawn('sh', ['-c', `${cmd} 2>&1 | systemd-cat --identifier=taverna-executor`], {
-      stdio: 'ignore',
-      detached: true,
-      env: { ...process.env },
-    })
-    proc.unref()
-    const drain = extraArgs.includes('--drain')
-    const project = extraArgs.includes('--project')
-      ? extraArgs[extraArgs.indexOf('--project') + 1]
-      : undefined
-    const label = project ? `projeto ${project}` : drain ? 'drain' : 'execute'
-    this.json(res, { started: true, message: `taverna ${label} iniciado` })
-  }
-
   private readBody(req: IncomingMessage): Promise<unknown> {
     return new Promise((resolve) => {
       let buf = ''
@@ -274,83 +107,209 @@ export class Router {
     })
   }
 
-  private async handleSessionPreview(
-    _req: IncomingMessage,
+  // ── Unified feature caller ─────────────────────────────────────────────────
+  // Merges path params + query string (GET) or body (POST) before calling handler.
+  private async callFeature(
+    req: IncomingMessage,
     res: ServerResponse,
+    feature: FeatureDef,
+    pathParams: Record<string, string>,
     url: URL,
   ): Promise<void> {
-    const { isBlocked } = await import('../vault/task.js')
-    const state = await this.cache.get()
-    const filterProject = url.searchParams.get('project')
-    const projects = filterProject
-      ? state.projects.filter((p) => p.id === filterProject || p.name === filterProject)
-      : state.projects
-
-    const result = projects
-      .map((p) => ({
-        project: p.id,
-        agent: p.agent ?? '',
-        tasks: p.tasks
-          .filter((t) => t.progresso < 100)
-          .filter((t) => !isBlocked(t, p.tasks).blocked)
-          .map((t) => ({
-            id: t.id,
-            title: t.title,
-            progresso: t.progresso,
-            prioridade: t.prioridade,
-          })),
-      }))
-      .filter((p) => p.tasks.length > 0)
-
-    this.json(res, {
-      projects: result,
-      total: result.reduce((s, p) => s + p.tasks.length, 0),
-    })
-  }
-
-  private async handleSessionRun(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const body = (await this.readBody(req)) as { project?: string; tasks?: string }
-    const project = body.project
-    if (!project) return this.json(res, { error: 'project required' }, 400)
-
-    const args = ['session', 'run', '--project', project]
-    if (body.tasks) args.push('--tasks', body.tasks)
-
-    const cmd = ['taverna', ...args].map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ')
-    const proc = spawn('sh', ['-c', `${cmd} 2>&1 | systemd-cat --identifier=taverna-executor`], {
-      stdio: 'ignore',
-      detached: true,
-      env: { ...process.env },
-    })
-    proc.unref()
-    this.json(res, {
-      started: true,
-      message: `taverna session run iniciado para projeto ${project}`,
-    })
-  }
-
-  private async handleInbox(_req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const inboxDir = join(this.config.vaultPath, '00_Inbox')
-    if (!existsSync(inboxDir)) return this.json(res, { count: 0, items: [] })
-
-    const files = (await readdir(inboxDir)).filter((f) => f.endsWith('.md'))
-    const items = []
-
-    for (const file of files) {
-      const raw = await readFile(join(inboxDir, file), 'utf8').catch(() => '')
-      if (!raw) continue
-      const { data } = parseFrontmatter(raw)
-      if (data['tipo'] !== 'agent-action-required') continue
-      items.push({
-        arquivo: file,
-        projeto: getString(data, 'projeto'),
-        agente: getString(data, 'agente'),
-        urgencia: getString(data, 'urgencia'),
-        timestamp: getString(data, 'timestamp'),
+    const params: Record<string, unknown> = { ...pathParams }
+    if (feature.httpMethod === 'POST') {
+      const body = (await this.readBody(req)) as Record<string, unknown>
+      Object.assign(params, body)
+    } else {
+      url.searchParams.forEach((v, k) => {
+        params[k] = v
       })
     }
+    try {
+      const result = await feature.handler(params, this.featureCtx)
+      this.json(res, result)
+    } catch (e) {
+      this.json(res, { error: e instanceof Error ? e.message : String(e) }, 500)
+    }
+  }
 
-    items.sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? ''))
-    this.json(res, { count: items.length, items })
+  async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    const path = url.pathname
+    const method = req.method ?? 'GET'
+
+    // ── HTML pages & global SSE (HTTP-specific, not in feature-map) ──────────
+    if (path === '/dashboard') return this.handleDashboard(req, res)
+    if (path === '/flow') return this.handleFlow(req, res)
+    if (path === '/status') return this.handleStatus(req, res)
+    if (path === '/events') return this.handleSSE(req, res)
+
+    // ── Live run view (HTTP-specific: HTML page + per-project SSE log tail) ───
+    const runMatch = path.match(/^\/run\/([^/]+)(\/events)?$/)
+    if (method === 'GET' && runMatch) {
+      const projectId = decodeURIComponent(runMatch[1] ?? '')
+      if (runMatch[2]) return this.handleRunEvents(req, res, projectId)
+      return this.handleRunView(req, res, projectId)
+    }
+
+    // ── Feature-map lookup (core + plugin) ───────────────────────────────────
+    const allFeatures = [...features, ...this.pluginFeatures]
+    for (const feature of allFeatures) {
+      if (feature.httpMethod !== method) continue
+      const httpPath = feature.httpPath ?? `/api/${feature.name}`
+      const pathParams = matchPath(httpPath, path)
+      if (pathParams !== null) {
+        return this.callFeature(req, res, feature, pathParams, url)
+      }
+    }
+
+    // ── Plugin raw HTTP routes (HTML, assets, etc.) ───────────────────────────
+    const pluginRoute = this.pluginRoutes.find((r) => {
+      if (r.method !== method) return false
+      return r.path.endsWith('*') ? path.startsWith(r.path.slice(0, -1)) : path === r.path
+    })
+    if (pluginRoute) return pluginRoute.handler(req, res, path)
+
+    this.json(res, { error: 'not found' }, 404)
+  }
+
+  // ── HTML renderers ────────────────────────────────────────────────────────
+
+  private async handleDashboard(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const state = await this.cache.get()
+    const costs = getDailyCosts(this.config.vaultPath)
+    const html = renderDashboard(state.projects, costs)
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end(html)
+  }
+
+  private async handleFlow(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const state = await this.cache.get()
+    const html = renderFlow(state.projects)
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end(html)
+  }
+
+  private handleRunView(_req: IncomingMessage, res: ServerResponse, projectId: string): void {
+    const html = renderRunPage(projectId)
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end(html)
+  }
+
+  // ── Status (HTTP-server-specific: includes sseClients count) ─────────────
+
+  private async handleStatus(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const state = await this.cache.get()
+    this.json(res, {
+      scannedAt: state.scannedAt,
+      projects: state.projects.length,
+      agents: state.agents.length,
+      vaultPath: state.vaultPath,
+      sseClients: this.sseClients.size,
+    })
+  }
+
+  // ── Global SSE ────────────────────────────────────────────────────────────
+
+  private handleSSE(req: IncomingMessage, res: ServerResponse): void {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+    })
+    res.write(`event: connected\ndata: ${new Date().toISOString()}\n\n`)
+    this.sseClients.add(res)
+    req.on('close', () => this.sseClients.delete(res))
+  }
+
+  // ── Per-project SSE log tail ──────────────────────────────────────────────
+  // Streams the executor log file in real-time; also watches the active dir
+  // so the client knows when a run starts or ends.
+
+  private handleRunEvents(req: IncomingMessage, res: ServerResponse, projectId: string): void {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+    })
+
+    const cleanup: (() => void)[] = []
+    req.on('close', () => cleanup.forEach((fn) => fn()))
+
+    const send: SendFn = (type, data) => {
+      try {
+        res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`)
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    // Check current state
+    const runs = getActiveRuns()
+    const current = runs.find((r) => r.project === projectId)
+    if (current) {
+      send('agent_active', current)
+      if (current.logFile) this.tailLog(current.logFile, projectId, send, cleanup)
+    } else {
+      send('idle', { project: projectId })
+    }
+
+    // Watch active dir: notify when run appears or disappears
+    try {
+      const w = watch(activeDir(), () => {
+        const updated = getActiveRuns()
+        const run = updated.find((r) => r.project === projectId)
+        if (run) {
+          send('agent_active', run)
+          if (run.logFile) this.tailLog(run.logFile, projectId, send, cleanup)
+        } else {
+          send('agent_done', { project: projectId })
+        }
+      })
+      cleanup.push(() => w.close())
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  private tailLog(logFile: string, projectId: string, send: SendFn, cleanup: (() => void)[]): void {
+    if (!existsSync(logFile)) return
+
+    // Send existing content
+    try {
+      const content = readFileSync(logFile, 'utf8')
+      if (content) send('agent_log', { project: projectId, message: content })
+    } catch {
+      /* ignore */
+    }
+
+    let offset = 0
+    try {
+      offset = statSync(logFile).size
+    } catch {
+      /* ignore */
+    }
+
+    // Watch for appended content
+    try {
+      const w = watch(logFile, () => {
+        try {
+          const buf = readFileSync(logFile)
+          const newBytes = buf.subarray(offset)
+          if (newBytes.length > 0) {
+            offset = buf.length
+            send('agent_log', { project: projectId, message: newBytes.toString('utf8') })
+          }
+        } catch {
+          /* ignore */
+        }
+      })
+      cleanup.push(() => w.close())
+    } catch {
+      /* non-fatal */
+    }
   }
 }

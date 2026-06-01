@@ -1,12 +1,13 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { writeFileSync, unlinkSync } from 'node:fs'
+import { writeFileSync, appendFileSync, unlinkSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { VaultAgent, VaultProject, VaultTask } from '../vault/types.js'
 import { isBlocked, hasCycle } from '../vault/task.js'
 import { updateCompletedTaskSessionId, markTasksInProgress } from '../vault/update.js'
-import { buildPrompt, buildSessionPrompt } from './prompt.js'
+import { buildPrompt, buildSessionPrompt, detectStudyMode } from './prompt.js'
+import { savePromptSnapshot } from './prompt-store.js'
 import { writeLogtaskFile } from './session.js'
 import type { SessionSpec } from './session.js'
 import { parseActionRequired } from '../inbox/action.js'
@@ -139,6 +140,7 @@ function spawnClaude(
   allowedTools?: string[],
   sessionName?: string,
   sessionId?: string,
+  logFile?: string,
 ): Promise<ClaudeJsonResult> {
   const args = ['--print', '--output-format', 'json', '--permission-mode', permissionMode]
   if (allowedTools && allowedTools.length > 0) {
@@ -148,10 +150,10 @@ function spawnClaude(
     args.push('--session-id', sessionId)
   }
 
-  const logFile = sessionName ? join(tmpdir(), `taverna-${sessionName}.log`) : undefined
-  if (logFile) {
-    writeFileSync(logFile, '(waiting for claude...)\n')
-    openTmuxSession(sessionName!, logFile)
+  const tmuxLog = sessionName ? join(tmpdir(), `taverna-${sessionName}.log`) : undefined
+  if (tmuxLog) {
+    writeFileSync(tmuxLog, '(waiting for claude...)\n')
+    openTmuxSession(sessionName!, tmuxLog)
   }
 
   return new Promise((resolve, reject) => {
@@ -166,6 +168,13 @@ function spawnClaude(
     })
     proc.stderr.on('data', (d: Buffer) => {
       stderr += d.toString()
+      if (logFile) {
+        try {
+          appendFileSync(logFile, d)
+        } catch {
+          /* non-fatal */
+        }
+      }
     })
 
     const timer = setTimeout(() => {
@@ -176,20 +185,28 @@ function spawnClaude(
     proc.on('close', (code) => {
       clearTimeout(timer)
       const parsed = parseClaudeJson(stdout)
-      if (logFile) {
+      if (tmuxLog) {
         try {
-          writeFileSync(logFile, parsed.text)
+          writeFileSync(tmuxLog, parsed.text)
         } catch {
           /* ignore */
         }
         setTimeout(() => {
           killTmuxSession(sessionName!)
           try {
-            unlinkSync(logFile)
+            unlinkSync(tmuxLog)
           } catch {
             /* ignore */
           }
         }, 3000)
+      }
+      if (logFile) {
+        try {
+          appendFileSync(logFile, `\n[taverna] claude saiu com código ${code ?? 'null'}\n`)
+          if (code === 0) appendFileSync(logFile, `\n--- RESULTADO ---\n${parsed.text}\n`)
+        } catch {
+          /* non-fatal */
+        }
       }
       if (code === 0) resolve(parsed)
       else reject(new Error(`claude exited with code ${code}: ${stderr.slice(0, 200)}`))
@@ -305,6 +322,20 @@ export async function runSession(
     logtaskPath,
   )
 
+  try {
+    savePromptSnapshot({
+      ts: new Date().toISOString(),
+      project: projectLabel,
+      agent: agentLabel,
+      mode: detectStudyMode(tasks[0]),
+      char_total: prompt.length,
+      task_count: tasks.length,
+      prompt,
+    })
+  } catch {
+    /* non-fatal */
+  }
+
   if (opts?.dryRun) {
     return { success: true, output: prompt, durationMs: 0 }
   }
@@ -313,12 +344,30 @@ export async function runSession(
   await markTasksInProgress(taskPaths, sessionId)
 
   const sessionName = `taverna-session-${projectLabel}`
+  const logDir = join(tmpdir(), 'taverna-sessions')
+  const logFile = join(logDir, `${projectLabel}-${sessionId}.log`)
+  try {
+    mkdirSync(logDir, { recursive: true })
+    writeFileSync(
+      logFile,
+      [
+        `[taverna] sessão iniciada ${new Date().toISOString()}`,
+        `[taverna] projeto: ${projectLabel}  agente: ${agentLabel}`,
+        `[taverna] tasks: ${tasks.map((t) => t.id).join(', ')}`,
+        `[taverna] aguardando claude...\n`,
+      ].join('\n'),
+    )
+  } catch {
+    /* non-fatal */
+  }
+
   markActive({
     project: projectLabel,
     agent: agentLabel,
     sessionId,
     startedAt: new Date().toISOString(),
     tmuxSession: sessionName,
+    logFile,
   })
 
   notificationBus
@@ -340,6 +389,7 @@ export async function runSession(
       allowedTools,
       sessionName,
       sessionId,
+      logFile,
     )
     const durationMs = Date.now() - start
     const resultado = parseResultado(text)

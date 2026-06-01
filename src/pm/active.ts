@@ -17,6 +17,7 @@ export interface ActiveRun {
   sessionId: string
   startedAt: string
   tmuxSession?: string
+  logFile?: string
 }
 
 function ensureDir(): void {
