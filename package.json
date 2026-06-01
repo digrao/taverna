@@ -24,7 +24,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli.ts",
-"typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",
     "lint:fix": "eslint src tests --fix",
     "format": "prettier --write src tests",
@@ -36,11 +36,12 @@
     "prepare": "simple-git-hooks || true"
   },
   "dependencies": {
+    "@jvcm-infra/neo-matrix": "file:../neo-matrix",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^12.0.0",
     "gray-matter": "^4.0.3",
     "js-yaml": "^4.1.0",
-"zod": "^4.4.3"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.5",
