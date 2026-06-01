@@ -33,7 +33,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "ci": "npm run typecheck && npm run lint && npm run test",
-    "prepare": "simple-git-hooks || true"
+    "prepare": "git rev-parse --git-dir 2>/dev/null && simple-git-hooks || true"
   },
   "dependencies": {
     "@jvcm-infra/neo-matrix": "file:../neo-matrix",
