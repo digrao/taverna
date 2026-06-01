@@ -41,7 +41,7 @@ The union type (`USPProject | BBProject | MetaProject`) is gone — `VaultProjec
 
 ## 4 — Matrix notifications (vault task 60)
 
-- [x] `src/notifications/matrix.ts` — `MatrixNotifier` using `@jvcm-infra/neo-matrix`
+- [x] `src/notifications/matrix.ts` — `MatrixNotifier` using `@digrao/neo-matrix`
 - [x] Register `MatrixNotifier` on `NotificationBus` at startup if `MATRIX_*` env vars are present
 - [ ] `taverna serve` — Matrix listener for `!work`, `!status` commands (`MATRIX_LISTEN=true`)
 

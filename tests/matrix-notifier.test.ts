@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { NeoMatrixClient } from '@jvcm-infra/neo-matrix'
 import { MatrixNotifier, matrixNotifierFromEnv } from '../src/notifications/matrix.js'
 
 const baseConfig = {
@@ -11,81 +10,58 @@ const baseConfig = {
   ],
 }
 
-function makeSendSpy(): ReturnType<typeof vi.fn> {
-  return vi.fn().mockResolvedValue(undefined)
+function mockFetch() {
+  return vi.spyOn(global, 'fetch').mockResolvedValue(new Response())
 }
 
 describe('MatrixNotifier', () => {
   beforeEach(() => vi.restoreAllMocks())
 
   it('sends to all rooms when no project is specified', async () => {
-    const client = new NeoMatrixClient(baseConfig)
-    const spy = makeSendSpy()
-    vi.spyOn(client, 'send').mockImplementation(spy)
-
-    const notifier = new MatrixNotifier(client)
+    const spy = mockFetch()
+    const notifier = new MatrixNotifier(baseConfig)
     await notifier.send({ text: 'hello' })
-
     expect(spy).toHaveBeenCalledTimes(2)
   })
 
   it('sends only to rooms matching the project', async () => {
-    const client = new NeoMatrixClient(baseConfig)
-    const spy = makeSendSpy()
-    vi.spyOn(client, 'send').mockImplementation(spy)
-
-    const notifier = new MatrixNotifier(client)
+    const spy = mockFetch()
+    const notifier = new MatrixNotifier(baseConfig)
     await notifier.send({ text: 'task done', project: 'project-alpha' })
-
     expect(spy).toHaveBeenCalledOnce()
-    expect(spy.mock.calls[0][0]).toBe('!proj-a:example.com')
+    const url = spy.mock.calls[0][0] as string
+    expect(decodeURIComponent(url)).toContain('!proj-a:example.com')
   })
 
   it('sends nothing when project has no matching room', async () => {
-    const client = new NeoMatrixClient(baseConfig)
-    const spy = makeSendSpy()
-    vi.spyOn(client, 'send').mockImplementation(spy)
-
-    const notifier = new MatrixNotifier(client)
+    const spy = mockFetch()
+    const notifier = new MatrixNotifier(baseConfig)
     await notifier.send({ text: 'x', project: 'unknown-project' })
-
     expect(spy).not.toHaveBeenCalled()
   })
 
   it('formats [CRITICAL] prefix for critical urgency', async () => {
-    const client = new NeoMatrixClient(baseConfig)
-    const spy = makeSendSpy()
-    vi.spyOn(client, 'send').mockImplementation(spy)
-
-    const notifier = new MatrixNotifier(client)
+    const spy = mockFetch()
+    const notifier = new MatrixNotifier(baseConfig)
     await notifier.send({ text: 'disk full', urgency: 'critical' })
-
-    const message = spy.mock.calls[0][1] as string
-    expect(message).toContain('[CRITICAL]')
+    const body = JSON.parse(spy.mock.calls[0][1]!.body as string) as { body: string }
+    expect(body.body).toContain('[CRITICAL]')
   })
 
   it('formats [WARN] prefix for warning urgency', async () => {
-    const client = new NeoMatrixClient(baseConfig)
-    const spy = makeSendSpy()
-    vi.spyOn(client, 'send').mockImplementation(spy)
-
-    const notifier = new MatrixNotifier(client)
+    const spy = mockFetch()
+    const notifier = new MatrixNotifier(baseConfig)
     await notifier.send({ text: 'slow', urgency: 'warning' })
-
-    const message = spy.mock.calls[0][1] as string
-    expect(message).toContain('[WARN]')
+    const body = JSON.parse(spy.mock.calls[0][1]!.body as string) as { body: string }
+    expect(body.body).toContain('[WARN]')
   })
 
   it('includes project and agent in formatted text', async () => {
-    const client = new NeoMatrixClient(baseConfig)
-    const spy = makeSendSpy()
-    vi.spyOn(client, 'send').mockImplementation(spy)
-
-    const notifier = new MatrixNotifier(client)
+    const spy = mockFetch()
+    const notifier = new MatrixNotifier(baseConfig)
     await notifier.send({ text: 'done', agent: '@dev-agent' })
-
-    const message = spy.mock.calls[0][1] as string
-    expect(message).toContain('(@dev-agent)')
+    const body = JSON.parse(spy.mock.calls[0][1]!.body as string) as { body: string }
+    expect(body.body).toContain('(@dev-agent)')
   })
 })
 
@@ -116,7 +92,6 @@ describe('matrixNotifierFromEnv', () => {
     vi.stubEnv('MATRIX_ACCESS_TOKEN', 'tok')
     vi.stubEnv('MATRIX_ROOM_IDS', '!room1:example.com,!room2:example.com')
     vi.stubEnv('MATRIX_ROOM_ID', '')
-    const notifier = matrixNotifierFromEnv()
-    expect(notifier).toBeInstanceOf(MatrixNotifier)
+    expect(matrixNotifierFromEnv()).toBeInstanceOf(MatrixNotifier)
   })
 })

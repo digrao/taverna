@@ -36,7 +36,6 @@
     "prepare": "git rev-parse --git-dir 2>/dev/null && simple-git-hooks || true"
   },
   "dependencies": {
-    "@jvcm-infra/neo-matrix": "file:../neo-matrix",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^12.0.0",
     "gray-matter": "^4.0.3",

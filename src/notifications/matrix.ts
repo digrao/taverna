@@ -1,16 +1,42 @@
-import { NeoMatrixClient } from '@jvcm-infra/neo-matrix'
 import type { Notifier, NotificationMessage } from './types.js'
 
+export interface MatrixRoom {
+  id: string
+  alias?: string
+  projectFilter?: string[]
+}
+
+export interface MatrixConfig {
+  homeserver: string
+  accessToken: string
+  rooms: MatrixRoom[]
+}
+
 export class MatrixNotifier implements Notifier {
-  constructor(private readonly client: NeoMatrixClient) {}
+  constructor(private readonly config: MatrixConfig) {}
 
   async send(msg: NotificationMessage): Promise<void> {
-    const rooms = msg.project ? this.client.rooms.byProject(msg.project) : this.client.rooms.all()
+    const rooms = msg.project
+      ? this.config.rooms.filter((r) => r.projectFilter?.includes(msg.project!))
+      : this.config.rooms
 
     if (rooms.length === 0) return
 
     const text = format(msg)
-    await Promise.allSettled(rooms.map((r) => this.client.send(r.id, text)))
+    await Promise.allSettled(rooms.map((r) => this.sendToRoom(r.id, text)))
+  }
+
+  private async sendToRoom(roomId: string, text: string): Promise<void> {
+    const txnId = Date.now()
+    const url = `${this.config.homeserver}/_matrix/client/r0/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${txnId}`
+    await fetch(url, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${this.config.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ msgtype: 'm.text', body: text }),
+    })
   }
 }
 
@@ -23,20 +49,19 @@ function format(msg: NotificationMessage): string {
   return parts.join(' ')
 }
 
-/** Build a MatrixNotifier from MATRIX_* env vars. Returns undefined if not configured. */
 export function matrixNotifierFromEnv(): MatrixNotifier | undefined {
   const homeserver = process.env['MATRIX_HOMESERVER']
   const accessToken = process.env['MATRIX_ACCESS_TOKEN']
   if (!homeserver || !accessToken) return undefined
-
-  const client = new NeoMatrixClient({ homeserver, accessToken, rooms: [] })
 
   const roomIds = (process.env['MATRIX_ROOM_IDS'] ?? process.env['MATRIX_ROOM_ID'] ?? '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
 
-  for (const id of roomIds) client.rooms.add({ id })
-
-  return new MatrixNotifier(client)
+  return new MatrixNotifier({
+    homeserver,
+    accessToken,
+    rooms: roomIds.map((id) => ({ id })),
+  })
 }
