@@ -1,7 +1,8 @@
 import { readdir, readFile, writeFile, mkdir, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import matter from 'gray-matter'
-import type { TavernaContext } from './types.js'
+import { z } from 'zod'
+import type { CommandDef, TavernaContext } from './types.js'
 
 export async function archiveTask(
   params: { projectId: string; taskId: string },
@@ -33,3 +34,19 @@ export async function archiveTask(
 
   return { archivedPath: archivePath }
 }
+
+export const archiveCommands: CommandDef[] = [
+  {
+    id: 'archive_task',
+    description: 'Mark a task as done (progresso: 100) and move it to tasks/archive/',
+    params: {
+      projectId: z.string().describe('Project ID'),
+      taskId: z.string().describe('Task ID prefix (partial match)'),
+    },
+    handler: (params, ctx) =>
+      archiveTask(
+        { projectId: String(params['projectId']), taskId: String(params['taskId']) },
+        ctx,
+      ),
+  },
+]

@@ -1,6 +1,6 @@
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { TavernaContext } from './types.js'
+import type { CommandDef, TavernaContext } from './types.js'
 import { emitEvent } from '../pm/event-bus.js'
 
 export async function emitInsights(
@@ -23,3 +23,12 @@ export async function emitInsights(
 
   return counts
 }
+
+export const insightsCommands: CommandDef[] = [
+  {
+    id: 'insights',
+    description: 'Count inbox, zettelkasten, and project entries in the vault',
+    params: {},
+    handler: (_, ctx) => emitInsights({}, ctx),
+  },
+]

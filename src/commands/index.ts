@@ -1,4 +1,11 @@
-export type { TavernaContext, CommandDef, ZodRawShape } from './types.js'
+export type {
+  TavernaContext,
+  CommandDef,
+  CommandContext,
+  CommandResult,
+  ZodRawShape,
+} from './types.js'
+export { CommandRegistry } from './types.js'
 
 // HTTP + CLI commands (exposed via all transports)
 export { stateCommands } from './state.js'
@@ -9,8 +16,17 @@ export { sessionCommands } from './session.js'
 export { runCommands } from './run.js'
 export { promptCommands } from './prompt.js'
 
-// CLI-only helpers (no HTTP registration)
+// CLI commands (no HTTP registration)
 export { snapshotCommands } from './snapshot.js'
+export { workCommands } from './work.js'
+export { reportCommands } from './report.js'
+export { planCommands } from './plan.js'
+export { archiveCommands } from './archive.js'
+export { insightsCommands } from './insights.js'
+export { policyCommands } from './policy.js'
+export { statusCommands } from './status-cmd.js'
+
+// CLI helpers (direct function exports, called by cli.ts)
 export { executeRun } from './run.js'
 export { executeSessionRun } from './session.js'
 export { generateReport } from './report.js'
@@ -29,18 +45,37 @@ import { sessionCommands } from './session.js'
 import { runCommands } from './run.js'
 import { promptCommands } from './prompt.js'
 import { snapshotCommands } from './snapshot.js'
+import { workCommands } from './work.js'
+import { reportCommands } from './report.js'
+import { planCommands } from './plan.js'
+import { archiveCommands } from './archive.js'
+import { insightsCommands } from './insights.js'
+import { policyCommands } from './policy.js'
+import { statusCommands } from './status-cmd.js'
 import type { CommandDef } from './types.js'
 
-/** All commands — CLI + HTTP/MCP.
- * Commands with `http` are registered as API endpoints and MCP tools.
+/** All commands.
+ * Commands with `http` are registered as HTTP endpoints and MCP tools.
  * Commands without `http` are CLI-only. */
 export const allCommands: CommandDef[] = [
+  // Monitoring & introspection (HTTP + CLI)
   ...stateCommands,
   ...projectsCommands,
   ...inboxCommands,
   ...backlinksCommands,
+  ...promptCommands,
+
+  // Execution triggers (HTTP fire-and-forget + CLI direct)
   ...sessionCommands,
   ...runCommands,
-  ...promptCommands,
+
+  // CLI-only
   ...snapshotCommands,
+  ...workCommands,
+  ...reportCommands,
+  ...planCommands,
+  ...archiveCommands,
+  ...insightsCommands,
+  ...policyCommands,
+  ...statusCommands,
 ]

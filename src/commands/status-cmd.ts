@@ -1,4 +1,5 @@
-import type { TavernaContext } from './types.js'
+import { z } from 'zod'
+import type { CommandDef, TavernaContext } from './types.js'
 import { scanVault } from '../vault/index.js'
 import { isBlocked, hasCycle, resolveDependency } from '../vault/task.js'
 
@@ -36,3 +37,17 @@ export async function showTaskStatus(
     }
   }
 }
+
+export const statusCommands: CommandDef[] = [
+  {
+    id: 'status',
+    description: 'Show task dependency tree and blocked tasks for a project',
+    params: {
+      projectId: z.string().describe('Project ID'),
+    },
+    handler: async (params, ctx) => {
+      await showTaskStatus({ projectId: String(params['projectId']) }, ctx)
+      return null
+    },
+  },
+]

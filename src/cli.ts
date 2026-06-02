@@ -55,7 +55,7 @@ program
   .option('--max-chars <n>', 'Max context chars', '8000')
   .option('--timeout <ms>', 'Agent timeout in ms', '600000')
   .option('--drain', 'Run tasks sequentially until done or --max-tasks is reached')
-  .option('--max-tasks <n>', 'Max tasks per drain session (default: 3)', '3')
+  .option('--max-tasks <n>', 'Max tasks per drain session', '3')
   .option('--pipeline', 'Run agents listed in project.pipeline frontmatter in sequence')
   .action(
     async (
@@ -184,7 +184,7 @@ program
   .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
   .option('--dry-run', 'Print what would run without executing')
   .option('--drain', 'Run tasks sequentially per project until done')
-  .option('--max-tasks <n>', 'Max tasks per project (default: 3)', '3')
+  .option('--max-tasks <n>', 'Max tasks per project', '3')
   .action(
     async (opts: { vault?: string; dryRun?: boolean; drain?: boolean; maxTasks?: string }) => {
       const ctx = buildContext(opts)
@@ -420,7 +420,7 @@ program
 
 program
   .command('mcp')
-  .description('Start MCP server (stdio) — wraps the HTTP API at :2948')
+  .description('Start MCP server (stdio) — exposes vault commands as tools')
   .option(
     '--api-url <url>',
     'Taverna HTTP API base URL (or TAVERNA_API_URL env var)',

@@ -1,6 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { TavernaContext } from './types.js'
+import { z } from 'zod'
+import type { CommandDef, TavernaContext } from './types.js'
 import { scanVault } from '../vault/index.js'
 import { readLogbook } from '../vault/logbook.js'
 
@@ -82,3 +83,17 @@ export async function generateReport(
 
   return { markdown, runs: runs.length }
 }
+
+export const reportCommands: CommandDef[] = [
+  {
+    id: 'report',
+    description: 'Summarise recent agent runs and write a report to 60_Agents/5_Inbox/',
+    params: {
+      hours: z.number().int().optional().describe('Lookback window in hours (default: 24)'),
+    },
+    handler: (params, ctx) => {
+      const hours = params['hours'] as number | undefined
+      return generateReport({ ...(hours !== undefined ? { hours } : {}) }, ctx)
+    },
+  },
+]

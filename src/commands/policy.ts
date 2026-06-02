@@ -1,4 +1,5 @@
-import type { TavernaContext } from './types.js'
+import { z } from 'zod'
+import type { CommandDef, TavernaContext } from './types.js'
 import { scanVault } from '../vault/index.js'
 import {
   defaultTypePolicies,
@@ -155,3 +156,24 @@ export async function showPolicy(
   }
   console.log(`\n${hr}`)
 }
+
+export const policyCommands: CommandDef[] = [
+  {
+    id: 'policy',
+    description: 'Show effective scheduling policy and permissions for a project (or all projects)',
+    params: {
+      projectId: z.string().optional().describe('Project ID'),
+      tipo: z.string().optional().describe('Filter by type: USP, BB, *'),
+    },
+    handler: async (params, ctx) => {
+      await showPolicy(
+        {
+          ...(params['projectId'] !== undefined ? { projectId: String(params['projectId']) } : {}),
+          ...(params['tipo'] !== undefined ? { tipo: String(params['tipo']) } : {}),
+        },
+        ctx,
+      )
+      return null
+    },
+  },
+]

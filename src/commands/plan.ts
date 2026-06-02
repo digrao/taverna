@@ -1,6 +1,6 @@
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { TavernaContext } from './types.js'
+import type { CommandDef, TavernaContext } from './types.js'
 import { scanVault } from '../vault/index.js'
 import { computeHealth } from '../pm/loki.js'
 
@@ -71,3 +71,12 @@ export async function generatePlan(
 
   return { markdown }
 }
+
+export const planCommands: CommandDef[] = [
+  {
+    id: 'plan',
+    description: 'Aggregate pending tasks across all projects and write STATUS.md to vault root',
+    params: {},
+    handler: (_, ctx) => generatePlan({}, ctx),
+  },
+]
