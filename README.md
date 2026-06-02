@@ -1,10 +1,12 @@
 # taverna
 
+> *Vontade é a condição necessária e suficiente para fazer a realidade.*
+
 A headless orchestrator that reads projects from an Obsidian vault, builds context-aware prompts, and runs [Claude Code](https://claude.ai/code) sessions on them.
 
 The core metaphor is a **deadpool board**: projects are contracts, agents are specialists, and the scheduler assigns work to whoever is eligible. A `@dev-agent` works on software, a `@study-assistant` processes course material. Everything runs in the background via systemd, observable through an HTTP dashboard.
 
-> *Vontade é a condição necessária e suficiente para fazer a realidade.*
+
 
 ## Quick start
 
