@@ -6,13 +6,116 @@ The core metaphor is a **deadpool board**: projects are contracts, agents are sp
 
 ## Quick start
 
-```bash
-npm install -g taverna
-export VAULT_PATH=~/my-vault
+### 1 — Install
 
-taverna work --dry-run    # preview what would run
-taverna work              # run once and exit
-taverna serve             # open dashboard at http://localhost:2948/dashboard
+**Build from source** (requires Node.js 22+ and the [Claude Code CLI](https://claude.ai/code) for agent execution)
+
+```bash
+git clone https://github.com/digrao/taverna.git
+cd taverna
+npm install && npm run build
+npm link
+```
+
+**Docker** (dashboard + read-only commands; agent execution requires `claude` CLI inside the container)
+
+```bash
+export VAULT_PATH=$HOME/my-vault
+docker compose up          # dashboard → http://localhost:2948/dashboard
+```
+
+---
+
+### 2 — Configure the vault
+
+Point taverna at your Obsidian vault by adding `VAULT_PATH` to `~/.config/taverna/.env`:
+
+```bash
+mkdir -p ~/.config/taverna
+echo "VAULT_PATH=$HOME/my-vault" >> ~/.config/taverna/.env
+```
+
+Taverna expects this layout inside the vault:
+
+```
+my-vault/
+  10_Projects/        ← one folder per project
+  60_Agents/
+    1_Directives/     ← agent instruction files
+    2_Logbooks/       ← auto-created by taverna
+```
+
+---
+
+### 3 — Create a project
+
+Each project is a Markdown file with frontmatter in `10_Projects/<id>/<id>.md`:
+
+```markdown
+---
+id: my-project
+tipo: "*"
+agent: "@dev-agent"
+priority: medium
+run_every: never
+---
+
+Project description and context for the agent.
+```
+
+Key frontmatter fields:
+
+| Field | Values | Notes |
+|---|---|---|
+| `id` | string | Unique identifier |
+| `tipo` | `*` \| `USP` \| `BB` | Project type; `*` = general |
+| `agent` | `@agent-name` | Which directive to use |
+| `priority` | `high` \| `medium` \| `low` | Scheduling weight |
+| `run_every` | `never` \| `daily` \| `weekly` \| `monthly` | How often to dispatch |
+
+Tasks go in `10_Projects/<id>/tasks/<task-id>.md`:
+
+```markdown
+---
+id: my-first-task
+title: "Implement X"
+progresso: 0
+---
+
+Detailed instructions for the agent.
+```
+
+---
+
+### 4 — Create an agent directive
+
+Directives live in `60_Agents/1_Directives/@<name>.md`:
+
+```markdown
+---
+name: "@dev-agent"
+description: "Full-stack developer — implements tasks, commits, and pushes"
+runner: claude
+permissions:
+  - Read
+  - Write
+  - Edit
+  - Bash
+---
+
+# Instructions
+
+You implement the next pending task. Validate locally and push to the remote.
+```
+
+---
+
+### 5 — Run
+
+```bash
+taverna session preview          # list projects with pending tasks
+taverna work                     # dispatch agents (requires claude CLI)
+taverna serve                    # HTTP dashboard → http://localhost:2948/dashboard
 ```
 
 ## Documentation

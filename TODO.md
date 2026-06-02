@@ -9,19 +9,19 @@ Sequential backlog for the core engine. Plugin-specific work lives in each plugi
 The union type (`USPProject | BBProject | MetaProject`) is gone — `VaultProject` is flat. Remaining cleanup:
 
 - [ ] Remove or replace `src/migrate/` — rarely used; candidate for a simple shell script or deletion
-- [ ] Evaluate `src/clockify/` — keep only if `deepwork_week_h` scorer field is actively used; otherwise remove and simplify scorer
-- [ ] `src/morning/` has moved to `taverna-briefing` plugin — remove from core if fully migrated
+- [x] `src/clockify/` — removed
+- [x] `src/morning/` — moved to `taverna-briefing` plugin
 - [ ] Drop `uspFolderPrefixes` from `TavernaConfig` (USP prefix detection belongs to plugin or is unused)
 
 ---
 
 ## 2 — Config & README (vault task 58)
 
-- [ ] `TavernaConfig`: remove fields belonging to pruned modules (`clockify`, `gdrive*`, `copypartyUrl`)
+- [ ] `TavernaConfig`: remove fields belonging to pruned modules (`gdrive*`, `copypartyUrl`, `morningOutputDir`, `morningFilename`, `uspFolderPrefixes`)
 - [ ] `agentDefaults` — move USP/BB-specific defaults to example; core default: `{ '*': '@dev-agent' }`
-- [ ] `uspFolderPrefixes` — empty array by default or removed
-- [ ] `VAULT_PATH` — emit a clear warning (not throw) when unset; allow `~/.config/taverna/.env` to supply it
-- [ ] README: installation, minimal config, vault structure, essential commands, MCP setup, how to write an agent
+- [ ] `VAULT_PATH` — emit a clear warning (not throw) when unset
+- [x] `~/.config/taverna/.env` — supported as fallback for `VAULT_PATH`
+- [x] README: quickstart rewritten; full docs in wiki
 
 ---
 
@@ -41,8 +41,8 @@ The union type (`USPProject | BBProject | MetaProject`) is gone — `VaultProjec
 
 ## 4 — Matrix notifications (vault task 60)
 
-- [x] `src/notifications/matrix.ts` — `MatrixNotifier` using `@digrao/neo-matrix`
-- [x] Register `MatrixNotifier` on `NotificationBus` at startup if `MATRIX_*` env vars are present
+- [x] `src/notifications/matrix.ts` — `MatrixNotifier` (direct HTTP, no external dep)
+- [ ] Register `MatrixNotifier` on `NotificationBus` at startup if `MATRIX_*` env vars are present (auto-registration removed in notifications refactor — needs plugin or re-wiring)
 - [ ] `taverna serve` — Matrix listener for `!work`, `!status` commands (`MATRIX_LISTEN=true`)
 
 ---
