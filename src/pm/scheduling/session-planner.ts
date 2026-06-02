@@ -59,7 +59,10 @@ export function planSession(
   const awaitingHuman: VaultTask[] = []
 
   for (const task of pending) {
-    const humanBlocked = task.bloqueio || (task.requerHumano && task.requerHumano.length > 0)
+    const humanBlocked =
+      task.assignee === 'human' ||
+      task.bloqueio ||
+      (task.requerHumano && task.requerHumano.length > 0)
     if (humanBlocked) {
       awaitingHuman.push(task)
       continue
@@ -99,6 +102,7 @@ export function hasRunnableTasks(project: VaultProject): boolean {
   const pending = project.tasks.filter((t) => t.progresso < 100)
   return pending.some(
     (t) =>
+      t.assignee !== 'human' &&
       !t.bloqueio &&
       !(t.requerHumano && t.requerHumano.length > 0) &&
       !isBlocked(t, project.tasks).blocked,

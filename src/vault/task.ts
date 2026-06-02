@@ -1,7 +1,14 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join, basename } from 'node:path'
 import { existsSync } from 'node:fs'
-import { parseFrontmatter, getProgress, getPriority, getString, getStringArray, getPipelineStage } from './frontmatter.js'
+import {
+  parseFrontmatter,
+  getProgress,
+  getPriority,
+  getString,
+  getStringArray,
+  getPipelineStage,
+} from './frontmatter.js'
 import type { VaultTask, TaskState, Priority, RawFrontmatter, UspTaskType } from './types.js'
 
 export function progressToState(progresso: number): TaskState {
@@ -14,6 +21,7 @@ export function progressToState(progresso: number): TaskState {
 export function deriveTaskState(progresso: number, raw: RawFrontmatter): TaskState {
   if (progresso === 100) return 'concluida'
   if (raw['bloqueio'] != null) return 'bloqueada'
+  if (raw['assignee'] === 'human') return 'aguardando_humano'
   const requerHumano = getStringArray(raw, 'requer_humano')
   if (requerHumano.length > 0 && progresso > 0) return 'aguardando_humano'
   return progressToState(progresso)
@@ -31,7 +39,7 @@ export async function readProjectTasks(projectFolderPath: string): Promise<Vault
   if (!existsSync(tasksDir)) return []
 
   const entries = await readdir(tasksDir)
-  const mdFiles = entries.filter(f => f.endsWith('.md') && f.toLowerCase() !== 'readme.md')
+  const mdFiles = entries.filter((f) => f.endsWith('.md') && f.toLowerCase() !== 'readme.md')
 
   const tasks: VaultTask[] = []
   for (const file of mdFiles) {
@@ -46,6 +54,7 @@ export async function readProjectTasks(projectFolderPath: string): Promise<Vault
     const requerHumano = getStringArray(data, 'requer_humano')
     const bloqueio = getString(data, 'bloqueio')
     const bloqueioDetalhe = getString(data, 'bloqueio_detalhe')
+    const assignee = getString(data, 'assignee')
 
     // supports both legacy `depende:` and new `depends_on:`
     const depends = [
@@ -76,6 +85,7 @@ export async function readProjectTasks(projectFolderPath: string): Promise<Vault
       ...(bloqueio !== undefined ? { bloqueio } : {}),
       ...(bloqueioDetalhe !== undefined ? { bloqueioDetalhe } : {}),
       ...(depends.length > 0 ? { depends } : {}),
+      ...(assignee !== undefined ? { assignee } : {}),
       state: deriveTaskState(progresso, data),
       body: content.trim(),
       raw: data,
@@ -88,12 +98,12 @@ export async function readProjectTasks(projectFolderPath: string): Promise<Vault
 // Resolves a dep ID ("07" or "07-scheduler-module") to a task from allTasks.
 // An archived (not in allTasks) dep returns undefined — treated as satisfied by the caller.
 export function resolveDependency(depId: string, allTasks: VaultTask[]): VaultTask | undefined {
-  return allTasks.find(t => t.id === depId || t.id.startsWith(depId + '-'))
+  return allTasks.find((t) => t.id === depId || t.id.startsWith(depId + '-'))
 }
 
 export interface BlockedInfo {
   blocked: boolean
-  blockedBy: string[]  // dep IDs that are not yet at 100%
+  blockedBy: string[] // dep IDs that are not yet at 100%
 }
 
 // A task is blocked if any of its declared deps is found in allTasks with progresso < 100.
@@ -110,7 +120,12 @@ export function isBlocked(task: VaultTask, allTasks: VaultTask[]): BlockedInfo {
   return { blocked: blockedBy.length > 0, blockedBy }
 }
 
-function dfs(taskId: string, taskMap: Map<string, VaultTask>, visited: Set<string>, stack: Set<string>): boolean {
+function dfs(
+  taskId: string,
+  taskMap: Map<string, VaultTask>,
+  visited: Set<string>,
+  stack: Set<string>,
+): boolean {
   visited.add(taskId)
   stack.add(taskId)
   const task = taskMap.get(taskId)
@@ -128,7 +143,7 @@ function dfs(taskId: string, taskMap: Map<string, VaultTask>, visited: Set<strin
 }
 
 export function hasCycle(tasks: VaultTask[]): boolean {
-  const taskMap = new Map(tasks.map(t => [t.id, t]))
+  const taskMap = new Map(tasks.map((t) => [t.id, t]))
   const visited = new Set<string>()
   const stack = new Set<string>()
   for (const t of tasks) {

@@ -43,6 +43,8 @@ export interface VaultTask {
   bloqueioDetalhe?: string
   // Dependency IDs from `depende:` or `depends_on:` frontmatter field
   depends?: string[]
+  // 'human' = must be done by a human; '@agent-name' = pinned to a specific agent
+  assignee?: string
   body: string
   raw: RawFrontmatter
 }
