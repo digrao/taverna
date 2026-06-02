@@ -9,12 +9,13 @@ import {
   executeRun,
   executeSessionRun,
   generateReport,
-  generatePlan,
+  generateAgenda,
   showPolicy,
   showTaskStatus,
   archiveTask,
-  emitInsights,
+  emitDigest,
   runWork,
+  runSync,
 } from './commands/index.js'
 import { migrate } from './migrate/index.js'
 import type { TavernaContext } from './commands/types.js'
@@ -287,13 +288,11 @@ program
     }
   })
 
-// ── snapshot ──────────────────────────────────────────────────────────────────
+// ── health ────────────────────────────────────────────────────────────────────
 
 program
-  .command('snapshot')
-  .description(
-    'Emit project_snapshot events for all projects (health + priority) without running agents',
-  )
+  .command('health')
+  .description('Emit health snapshot events for all projects (health + priority)')
   .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
   .option('--tipo <tipo>', 'Filter by project type: USP, BB, *')
   .option('--dry-run', 'Print JSON to stdout without journal emission')
@@ -371,16 +370,16 @@ program
     for (const r of results) console.log(`  ${r.sourceRelative}`)
   })
 
-// ── plan ─────────────────────────────────────────────────────────────────────
+// ── agenda ────────────────────────────────────────────────────────────────────
 
 program
-  .command('plan')
+  .command('agenda')
   .description('Aggregate pending tasks across all projects and write STATUS.md to vault root')
   .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
   .option('--dry-run', 'Print to stdout without writing')
   .action(async (opts: { vault?: string; dryRun?: boolean }) => {
     const ctx = buildContext(opts)
-    const { markdown, outPath } = await generatePlan({}, ctx)
+    const { markdown, outPath } = await generateAgenda({}, ctx)
     if (opts.dryRun) {
       process.stdout.write(markdown + '\n')
     } else {
@@ -392,15 +391,62 @@ program
     }
   })
 
-// ── insights ──────────────────────────────────────────────────────────────────
+// ── digest ────────────────────────────────────────────────────────────────────
 
 program
-  .command('insights')
-  .description('Emit a vault_snapshot event with inbox/zettelkasten/projects counts')
+  .command('digest')
+  .description('Count inbox, zettelkasten, and project entries in the vault')
   .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
   .action(async (opts: { vault?: string }) => {
     const ctx = buildContext(opts)
-    await emitInsights({}, ctx)
+    const counts = await emitDigest({}, ctx)
+    console.log(`  inbox        ${counts.inbox}`)
+    console.log(`  zettelkasten ${counts.zettelkasten}`)
+    console.log(`  projects     ${counts.projects}`)
+  })
+
+// ── inbox ─────────────────────────────────────────────────────────────────────
+
+program
+  .command('inbox')
+  .description('Show action-required notices and human-assigned tasks awaiting your input')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .action(async (opts: { vault?: string }) => {
+    const ctx = buildContext(opts)
+    const { getInboxItems } = await import('./commands/inbox.js')
+    const { actionRequired, humanTasks } = await getInboxItems(ctx)
+
+    if (actionRequired.count === 0 && humanTasks.count === 0) {
+      console.log('Nothing pending.')
+      return
+    }
+
+    if (actionRequired.count > 0) {
+      console.log(`\nAgent action-required (${actionRequired.count}):`)
+      for (const item of actionRequired.items) {
+        const ts = item['timestamp'] ? `  ${item['timestamp']}` : ''
+        console.log(`  [${item['urgencia'] ?? '?'}] ${item['projeto']}${ts}`)
+      }
+    }
+
+    if (humanTasks.count > 0) {
+      console.log(`\nHuman tasks (${humanTasks.count}):`)
+      for (const t of humanTasks.items) {
+        console.log(`  [${t.priority}] ${t.project}  ${t.title}`)
+      }
+    }
+    console.log()
+  })
+
+// ── sync ──────────────────────────────────────────────────────────────────────
+
+program
+  .command('sync')
+  .description('Update all git submodule projects to their latest remote commit')
+  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
+  .action(async (opts: { vault?: string }) => {
+    const ctx = buildContext(opts)
+    await runSync(ctx)
   })
 
 // ── serve ─────────────────────────────────────────────────────────────────────

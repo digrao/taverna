@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import type { CommandDef, TavernaContext } from './types.js'
 import { emitEvent } from '../pm/observability/index.js'
 
-export async function emitInsights(
+export async function emitDigest(
   _params: Record<string, unknown>,
   ctx: TavernaContext,
 ): Promise<{ inbox: number; zettelkasten: number; projects: number }> {
@@ -26,9 +26,9 @@ export async function emitInsights(
 
 export const insightsCommands: CommandDef[] = [
   {
-    id: 'insights',
+    id: 'digest',
     description: 'Count inbox, zettelkasten, and project entries in the vault',
     params: {},
-    handler: (_, ctx) => emitInsights({}, ctx),
+    handler: (_, ctx) => emitDigest({}, ctx),
   },
 ]

@@ -12,7 +12,7 @@ const HEALTH_ICON: Record<string, string> = {
   idle: '⚪',
 }
 
-export async function generatePlan(
+export async function generateAgenda(
   _params: Record<string, unknown>,
   ctx: TavernaContext,
 ): Promise<{ markdown: string; outPath?: string }> {
@@ -25,7 +25,7 @@ export async function generatePlan(
   const lines: string[] = [
     `# STATUS — ${dateStr}`,
     '',
-    `_${vault.projects.length} projetos · gerado por \`taverna plan\`_`,
+    `_${vault.projects.length} projetos · gerado por \`taverna agenda\`_`,
     '',
   ]
 
@@ -74,9 +74,9 @@ export async function generatePlan(
 
 export const planCommands: CommandDef[] = [
   {
-    id: 'plan',
+    id: 'agenda',
     description: 'Aggregate pending tasks across all projects and write STATUS.md to vault root',
     params: {},
-    handler: (_, ctx) => generatePlan({}, ctx),
+    handler: (_, ctx) => generateAgenda({}, ctx),
   },
 ]

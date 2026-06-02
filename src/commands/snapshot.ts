@@ -5,9 +5,8 @@ import { computeHealth, snapshot } from '../pm/observability/index.js'
 
 export const snapshotCommands: CommandDef[] = [
   {
-    id: 'snapshot',
-    description:
-      'Emit project_snapshot events for all projects (health + priority) without running agents',
+    id: 'health',
+    description: 'Emit health snapshot events for all projects (health + priority)',
     params: {
       tipo: z.string().optional().describe('Filter by project type: USP, BB, *'),
     },
