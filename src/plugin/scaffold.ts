@@ -133,30 +133,29 @@ dist/
   await write(
     'src/index.ts',
     `import type { TavernaPlugin } from 'taverna/plugin'
-import type { FeatureContext } from 'taverna/infra'
+import type { CommandDef, TavernaContext } from 'taverna/core'
 import type { NotificationBus } from 'taverna/notifications'
+
+const commands: CommandDef[] = [
+  {
+    id: '${baseName}_ping',
+    description: 'Health check',
+    params: {},
+    http: { method: 'GET', path: '/api/${baseName}/ping' },
+    handler: async (_: Record<string, unknown>, ctx: TavernaContext) => {
+      return { ok: true, vault: ctx.vaultPath }
+    },
+  },
+]
 
 const plugin: TavernaPlugin = {
   name: 'taverna-${baseName}',
 
-  // ── MCP tools + HTTP endpoints ────────────────────────────────────────
-  features: [
-    {
-      name: '${baseName}_ping',
-      description: 'Health check',
-      params: {},
-      httpMethod: 'GET',
-      httpPath: '/api/${baseName}/ping',
-      handler: async (_: Record<string, unknown>, ctx: FeatureContext) => {
-        return { ok: true, vault: ctx.vaultPath }
-      },
-    },
-  ],
+  // ── Commands (MCP tools + HTTP endpoints) ────────────────────────────
+  commands,
 
   // ── Notification sink (optional) ─────────────────────────────────────
   onLoad(bus: NotificationBus) {
-    // Register a custom notification sink, e.g. Slack or webhook.
-    // Remove this block if not needed.
     bus.addSink({
       name: '${baseName}-sink',
       send: async (_msg) => { /* TODO: forward notification */ },
@@ -164,7 +163,6 @@ const plugin: TavernaPlugin = {
   },
 
   // ── Scheduler hooks (optional) ───────────────────────────────────────
-  // Uncomment and implement the slots you want to override.
   // scheduling: {
   //   scoring: {
   //     score(project, agentId, ctx) {
@@ -193,16 +191,15 @@ describe('taverna-${baseName} plugin', () => {
     expect(plugin.name).toBe('taverna-${baseName}')
   })
 
-  it('exports at least one feature', () => {
-    expect(plugin.features?.length).toBeGreaterThan(0)
+  it('exports at least one command', () => {
+    expect(plugin.commands?.length).toBeGreaterThan(0)
   })
 
-  it('all features have required fields', () => {
-    for (const f of plugin.features ?? []) {
-      expect(f.name).toBeTruthy()
-      expect(f.description).toBeTruthy()
-      expect(f.httpMethod).toMatch(/^GET|POST$/)
-      expect(typeof f.handler).toBe('function')
+  it('all commands have required fields', () => {
+    for (const c of plugin.commands ?? []) {
+      expect(c.id).toBeTruthy()
+      expect(c.description).toBeTruthy()
+      expect(typeof c.handler).toBe('function')
     }
   })
 })

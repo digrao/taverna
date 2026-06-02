@@ -99,12 +99,5 @@ export function planSessions(
 
 /** Returns true if a project has at least one task that can run right now. */
 export function hasRunnableTasks(project: VaultProject): boolean {
-  const pending = project.tasks.filter((t) => t.progresso < 100)
-  return pending.some(
-    (t) =>
-      t.assignee !== 'human' &&
-      !t.bloqueio &&
-      !(t.requerHumano && t.requerHumano.length > 0) &&
-      !isBlocked(t, project.tasks).blocked,
-  )
+  return planSession(project).runnable.length > 0
 }
