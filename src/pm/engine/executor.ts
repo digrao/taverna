@@ -17,6 +17,7 @@ import type { SessionSpec } from '../prompt/session.js'
 import { parseActionRequired } from '../../inbox/action.js'
 import { log } from '../observability/loki.js'
 import { resolvePolicy } from '../scheduling/policy-resolver.js'
+import type { SchedulingPlugins } from '../scheduling/plugins.js'
 import { checkBudget, recordCost, loadVaultBudgetConfig } from '../observability/budget.js'
 import type { BudgetConfig } from '../observability/budget.js'
 import { notificationBus } from '../../notifications/bus.js'
@@ -64,6 +65,7 @@ export interface ExecutorOptions {
   dryRun?: boolean
   previousOutput?: string
   vaultPath?: string
+  schedulingPlugins?: SchedulingPlugins
 }
 
 export interface TokenUsage {
@@ -236,7 +238,8 @@ export async function runSession(
   const maxContextChars = opts?.maxContextChars ?? 8000
   const timeoutMs = opts?.timeoutMs ?? 600_000
 
-  const policy = resolvePolicy(agent, project)
+  const policy =
+    opts?.schedulingPlugins?.permissions?.resolve(agent, project) ?? resolvePolicy(agent, project)
   const permissionMode = opts?.permissionMode ?? policy.permissionMode
   const allowedTools = policy.allowedTools
 
@@ -523,7 +526,8 @@ export async function runAgent(
   const maxContextChars = opts?.maxContextChars ?? 8000
   const timeoutMs = opts?.timeoutMs ?? 600_000
 
-  const policy = resolvePolicy(agent, project)
+  const policy =
+    opts?.schedulingPlugins?.permissions?.resolve(agent, project) ?? resolvePolicy(agent, project)
   const permissionMode = opts?.permissionMode ?? policy.permissionMode
   const allowedTools = policy.allowedTools
 

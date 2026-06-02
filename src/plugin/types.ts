@@ -4,6 +4,7 @@ import type { FeatureDef, FeatureContext } from '../infra/feature-map.js'
 import type { NotificationBus } from '../notifications/bus.js'
 import type { AgentResult } from '../pm/engine/index.js'
 import type { VaultProject } from '../vault/types.js'
+import type { SchedulingPlugins } from '../pm/scheduling/plugins.js'
 
 export interface HttpRoute {
   method: 'GET' | 'POST'
@@ -57,4 +58,10 @@ export interface TavernaPlugin {
    * Use for post-run side effects (e.g. asset uploads, telemetry).
    */
   afterRun?: (result: AgentResult, project: VaultProject, ctx: FeatureContext) => Promise<void>
+
+  /**
+   * Override scoring, triage, or permission resolution for the scheduler.
+   * Each slot is optional — omitted slots use the built-in default.
+   */
+  scheduling?: SchedulingPlugins
 }

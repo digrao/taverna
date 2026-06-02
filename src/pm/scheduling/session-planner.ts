@@ -1,5 +1,6 @@
 import type { VaultProject, VaultTask, Priority } from '../../vault/types.js'
 import { isBlocked } from '../../vault/task.js'
+import type { TriagePlugin } from './plugins.js'
 
 export interface TaskPlan {
   task: VaultTask
@@ -36,8 +37,22 @@ function sortTasks(tasks: VaultTask[]): VaultTask[] {
  * Returns runnable tasks (sorted by priority → deadline), blocked tasks with
  * their blocker IDs, and tasks awaiting human input.
  */
-export function planSession(project: VaultProject, maxTasks = Infinity): SessionPlan {
+export function planSession(
+  project: VaultProject,
+  maxTasks = Infinity,
+  triagePlugin?: TriagePlugin,
+): SessionPlan {
   const pending = project.tasks.filter((t) => t.progresso < 100)
+
+  if (triagePlugin) {
+    const result = triagePlugin.triage(pending, project)
+    return {
+      project,
+      runnable: sortTasks(result.runnable).slice(0, maxTasks),
+      blocked: result.skipped.map((e) => ({ task: e.task, blockedBy: [e.reason] })),
+      awaitingHuman: [],
+    }
+  }
 
   const runnable: VaultTask[] = []
   const blocked: TaskPlan[] = []

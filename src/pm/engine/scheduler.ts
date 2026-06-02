@@ -17,6 +17,7 @@ import { drainProject } from './execute.js'
 import { planSession, hasRunnableTasks } from '../scheduling/session-planner.js'
 import type { TavernaPlugin } from '../../plugin/types.js'
 import type { FeatureContext } from '../../infra/feature-map.js'
+import type { SchedulingPlugins } from '../scheduling/plugins.js'
 import { notificationBus } from '../../notifications/bus.js'
 
 export interface SchedulerOptions {
@@ -27,6 +28,8 @@ export interface SchedulerOptions {
   runBatchSize?: number
   /** Max concurrent runs per agent id */
   maxConcurrentPerAgent?: Record<string, number>
+  /** Pluggable scheduling behaviours (scoring, triage, permissions) */
+  schedulingPlugins?: SchedulingPlugins
 }
 
 /**
@@ -108,7 +111,9 @@ export async function runScheduler(
   }
 
   // ── Rank and dispatch ─────────────────────────────────────────────────
-  const ranked = rankProjects(eligible, config.agentDefaults, { now })
+  const ranked =
+    opts.schedulingPlugins?.scoring?.rank(eligible, config.agentDefaults, { now }) ??
+    rankProjects(eligible, config.agentDefaults, { now })
 
   const agentRunCount: Record<string, number> = {}
   let batchCount = 0
@@ -132,7 +137,7 @@ export async function runScheduler(
     const eligibleSteps = steps.filter((s) => isAtSatisfied(s.at, now))
 
     if (opts.dryRun) {
-      const plan = planSession(project, maxTasksPerProject)
+      const plan = planSession(project, maxTasksPerProject, opts.schedulingPlugins?.triage)
       const score = ranked.find((r) => r.project.id === project.id)?.score ?? '?'
       for (const step of eligibleSteps) {
         const at = step.at ? ` at ${step.at}` : ''
@@ -177,7 +182,11 @@ export async function runScheduler(
         agent,
         project,
         maxTasksPerProject,
-        {},
+        {
+          ...(opts.schedulingPlugins !== undefined
+            ? { schedulingPlugins: opts.schedulingPlugins }
+            : {}),
+        },
         config,
         false,
         async (result, proj) => {
