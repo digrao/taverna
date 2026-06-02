@@ -152,19 +152,27 @@ Full documentation lives in the [wiki](https://github.com/digrao/taverna/wiki):
 
 ## Plugins
 
-Plugins extend taverna with new MCP tools, HTTP routes, and CLI commands without touching the core:
+Plugins extend taverna with new MCP tools, HTTP routes, CLI commands, and scheduling behaviour — without touching the core.
+
+Scaffold a new plugin:
+
+```bash
+taverna create-plugin my-feature
+```
+
+### Features (MCP tools + HTTP endpoints)
 
 ```ts
 import type { TavernaPlugin } from 'taverna/plugin'
-import { z } from 'zod'
 
 const plugin: TavernaPlugin = {
-  name: 'my-feature',
+  name: 'taverna-my-feature',
   features: [{
     name: 'my_tool',
-    description: 'Does something',
+    description: 'Does something useful',
     params: { id: z.string() },
     httpMethod: 'GET',
+    httpPath: '/api/my-feature/:id',
     handler: async ({ id }, ctx) => ({ id, vault: ctx.vaultPath }),
   }],
 }
@@ -172,7 +180,32 @@ const plugin: TavernaPlugin = {
 export default plugin
 ```
 
-Register via `TAVERNA_PLUGINS=/path/to/dist/index.js`. See the [Plugin System wiki page](https://github.com/digrao/taverna/wiki/Plugin-System) for the full interface.
+### Scheduling plugin — override scoring
+
+Plugins can replace the built-in project ranking, task triage, or permission resolution.
+Each slot is independent — implement only the ones you need:
+
+```ts
+const plugin: TavernaPlugin = {
+  name: 'taverna-my-scorer',
+  scheduling: {
+    scoring: {
+      score(project, agentId, ctx) {
+        // your scoring logic — return { project, agentId, score, factors }
+        const score = project.priority === 'high' ? 100 : 50
+        return { project, agentId, score, factors: [{ name: 'priority', points: score, detail: project.priority }] }
+      },
+      rank(projects, agentDefaults, ctx) {
+        return projects
+          .map(p => this.score(p, agentDefaults[p.tipo] ?? '', ctx))
+          .sort((a, b) => b.score - a.score)
+      },
+    },
+  },
+}
+```
+
+Register via `TAVERNA_PLUGINS=/path/to/dist/index.js`. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full interface reference.
 
 ## License
 

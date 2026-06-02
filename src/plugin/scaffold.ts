@@ -134,10 +134,12 @@ dist/
     'src/index.ts',
     `import type { TavernaPlugin } from 'taverna/plugin'
 import type { FeatureContext } from 'taverna/infra'
+import type { NotificationBus } from 'taverna/notifications'
 
 const plugin: TavernaPlugin = {
   name: 'taverna-${baseName}',
 
+  // ── MCP tools + HTTP endpoints ────────────────────────────────────────
   features: [
     {
       name: '${baseName}_ping',
@@ -150,6 +152,31 @@ const plugin: TavernaPlugin = {
       },
     },
   ],
+
+  // ── Notification sink (optional) ─────────────────────────────────────
+  onLoad(bus: NotificationBus) {
+    // Register a custom notification sink, e.g. Slack or webhook.
+    // Remove this block if not needed.
+    bus.addSink({
+      name: '${baseName}-sink',
+      send: async (_msg) => { /* TODO: forward notification */ },
+    })
+  },
+
+  // ── Scheduler hooks (optional) ───────────────────────────────────────
+  // Uncomment and implement the slots you want to override.
+  // scheduling: {
+  //   scoring: {
+  //     score(project, agentId, ctx) {
+  //       return { project, agentId, score: 0, factors: [] }
+  //     },
+  //     rank(projects, agentDefaults, ctx) {
+  //       return projects
+  //         .map(p => this.score(p, agentDefaults[p.tipo] ?? '', ctx))
+  //         .sort((a, b) => b.score - a.score)
+  //     },
+  //   },
+  // },
 }
 
 export default plugin
