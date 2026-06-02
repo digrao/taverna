@@ -1,7 +1,7 @@
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { CommandDef, TavernaContext } from './types.js'
-import { emitEvent } from '../pm/event-bus.js'
+import { emitEvent } from '../pm/observability/index.js'
 
 export async function emitInsights(
   _params: Record<string, unknown>,

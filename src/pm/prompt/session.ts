@@ -2,7 +2,7 @@ import { writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import matter from 'gray-matter'
-import type { VaultTask } from '../vault/types.js'
+import type { VaultTask } from '../../vault/types.js'
 
 export interface SessionSpec {
   session_id: string

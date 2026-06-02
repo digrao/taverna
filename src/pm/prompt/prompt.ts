@@ -1,8 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
-import type { VaultProject, VaultAgent, VaultTask } from '../vault/types.js'
-import { isBlocked } from '../vault/task.js'
+import type { VaultProject, VaultAgent, VaultTask } from '../../vault/types.js'
+import { isBlocked } from '../../vault/task.js'
 
 const MODE_MAP: Record<string, string> = {
   vhdl: 'vhdl.md',

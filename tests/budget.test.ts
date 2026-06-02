@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { recordCost, checkBudget, getBudgetStatus } from '../src/pm/budget.js'
+import { recordCost, checkBudget, getBudgetStatus } from '../src/pm/observability/budget.js'
 
 function makeVault(): string {
   return mkdtempSync(join(tmpdir(), 'budget-test-'))

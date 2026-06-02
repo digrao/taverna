@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { VaultAgent, VaultProject } from '../vault/types.js'
+import type { VaultAgent, VaultProject } from '../../vault/types.js'
 
 export interface ResolvedPolicy {
   permissionMode: 'bypassPermissions' | 'default'

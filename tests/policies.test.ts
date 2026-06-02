@@ -7,7 +7,7 @@ import {
   getTypePolicy,
   type TypePolicy,
   type PolicyStep,
-} from '../src/pm/policies.js'
+} from '../src/pm/scheduling/policies.js'
 import type { VaultProject } from '../src/vault/types.js'
 
 const baseProject: VaultProject = {

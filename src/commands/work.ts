@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { CommandDef, TavernaContext } from './types.js'
-import { defaultTypePolicies } from '../pm/policies.js'
-import { runScheduler } from '../pm/scheduler.js'
+import { defaultTypePolicies } from '../pm/scheduling/index.js'
+import { runScheduler } from '../pm/engine/index.js'
 import { loadPlugins } from '../plugin/loader.js'
 
 export async function runWork(

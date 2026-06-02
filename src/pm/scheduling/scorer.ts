@@ -1,5 +1,5 @@
-import type { VaultProject, Priority } from '../vault/types.js'
-import { computeHealth } from './loki.js'
+import type { VaultProject, Priority } from '../../vault/types.js'
+import { computeHealth } from '../observability/loki.js'
 
 export interface ScoreContext {
   now: Date

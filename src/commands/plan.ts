@@ -2,7 +2,7 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { CommandDef, TavernaContext } from './types.js'
 import { scanVault } from '../vault/index.js'
-import { computeHealth } from '../pm/loki.js'
+import { computeHealth } from '../pm/observability/index.js'
 
 const PRIO_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 }
 const HEALTH_ICON: Record<string, string> = {

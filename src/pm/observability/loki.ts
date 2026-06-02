@@ -1,5 +1,5 @@
 import { emitEvent } from './event-bus.js'
-import type { VaultProject } from '../vault/types.js'
+import type { VaultProject } from '../../vault/types.js'
 
 export type LogStatus = 'success' | 'failed'
 export type HealthStatus = 'ok' | 'at-risk' | 'overdue' | 'idle'

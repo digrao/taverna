@@ -3,8 +3,8 @@ import { spawn } from 'node:child_process'
 import type { CommandDef, TavernaContext } from './types.js'
 import { scanVault, appendLogbook, updateProjectStatus } from '../vault/index.js'
 import { isBlocked } from '../vault/task.js'
-import { runSession } from '../pm/executor.js'
-import type { AgentResult } from '../pm/executor.js'
+import { runSession } from '../pm/engine/index.js'
+import type { AgentResult } from '../pm/engine/index.js'
 import type { VaultTask } from '../vault/types.js'
 
 function scanFor(ctx: TavernaContext) {

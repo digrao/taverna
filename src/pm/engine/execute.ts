@@ -1,6 +1,6 @@
 import { hostname as osHostname } from 'node:os'
-import type { VaultAgent, VaultProject } from '../vault/types.js'
-import type { TavernaConfig } from '../config.js'
+import type { VaultAgent, VaultProject } from '../../vault/types.js'
+import type { TavernaConfig } from '../../config.js'
 import { runAgent } from './executor.js'
 import type { ExecutorOptions, AgentResult } from './executor.js'
 import {
@@ -8,10 +8,10 @@ import {
   appendProjectLogbook,
   updateProjectStatus,
   readProject,
-} from '../vault/index.js'
-import { snapshot, computeHealth } from './loki.js'
-import { writeActionRequest } from '../inbox/action.js'
-import type { ActionUrgency } from '../inbox/action.js'
+} from '../../vault/index.js'
+import { snapshot, computeHealth } from '../observability/loki.js'
+import { writeActionRequest } from '../../inbox/action.js'
+import type { ActionUrgency } from '../../inbox/action.js'
 
 export { type AgentResult }
 

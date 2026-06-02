@@ -3,24 +3,24 @@ import { randomUUID } from 'node:crypto'
 import { writeFileSync, appendFileSync, unlinkSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { VaultAgent, VaultProject, VaultTask } from '../vault/types.js'
-import { isBlocked, hasCycle } from '../vault/task.js'
+import type { VaultAgent, VaultProject, VaultTask } from '../../vault/types.js'
+import { isBlocked, hasCycle } from '../../vault/task.js'
 import {
   updateCompletedTaskSessionId,
   markTasksInProgress,
   archiveCompletedTasks,
-} from '../vault/update.js'
-import { buildPrompt, buildSessionPrompt, detectStudyMode } from './prompt.js'
-import { savePromptSnapshot } from './prompt-store.js'
-import { writeLogtaskFile } from './session.js'
-import type { SessionSpec } from './session.js'
-import { parseActionRequired } from '../inbox/action.js'
-import { log } from './loki.js'
-import { resolvePolicy } from './policy-resolver.js'
-import { checkBudget, recordCost, loadVaultBudgetConfig } from './budget.js'
-import type { BudgetConfig } from './budget.js'
-import { notificationBus } from '../notifications/bus.js'
-import { markActive, markInactive } from './active.js'
+} from '../../vault/update.js'
+import { buildPrompt, buildSessionPrompt, detectStudyMode } from '../prompt/prompt.js'
+import { savePromptSnapshot } from '../prompt/prompt-store.js'
+import { writeLogtaskFile } from '../prompt/session.js'
+import type { SessionSpec } from '../prompt/session.js'
+import { parseActionRequired } from '../../inbox/action.js'
+import { log } from '../observability/loki.js'
+import { resolvePolicy } from '../scheduling/policy-resolver.js'
+import { checkBudget, recordCost, loadVaultBudgetConfig } from '../observability/budget.js'
+import type { BudgetConfig } from '../observability/budget.js'
+import { notificationBus } from '../../notifications/bus.js'
+import { markActive, markInactive } from '../observability/active.js'
 
 function formatAgentStartMessage(
   project: string,

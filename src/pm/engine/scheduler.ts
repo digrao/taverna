@@ -1,23 +1,23 @@
 import { hostname as osHostname } from 'node:os'
-import type { TavernaConfig } from '../config.js'
-import type { VaultProject } from '../vault/types.js'
-import { scanVault } from '../vault/index.js'
-import { deferred } from './loki.js'
-import { rankProjects } from './scorer.js'
-import { isRunWindowOpen } from './run-window.js'
+import type { TavernaConfig } from '../../config.js'
+import type { VaultProject } from '../../vault/types.js'
+import { scanVault } from '../../vault/index.js'
+import { deferred } from '../observability/loki.js'
+import { rankProjects } from '../scheduling/scorer.js'
+import { isRunWindowOpen } from '../scheduling/run-window.js'
 import {
   isProjectDue,
   readProjectPolicy,
   mergePolicy,
   isAtSatisfied,
   getTypePolicy,
-} from './policies.js'
-import type { TypePolicy } from './policies.js'
+} from '../scheduling/policies.js'
+import type { TypePolicy } from '../scheduling/policies.js'
 import { drainProject } from './execute.js'
-import { planSession, hasRunnableTasks } from './session-planner.js'
-import type { TavernaPlugin } from '../plugin/types.js'
-import type { FeatureContext } from '../infra/feature-map.js'
-import { notificationBus } from '../notifications/bus.js'
+import { planSession, hasRunnableTasks } from '../scheduling/session-planner.js'
+import type { TavernaPlugin } from '../../plugin/types.js'
+import type { FeatureContext } from '../../infra/feature-map.js'
+import { notificationBus } from '../../notifications/bus.js'
 
 export interface SchedulerOptions {
   dryRun?: boolean

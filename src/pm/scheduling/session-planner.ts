@@ -1,5 +1,5 @@
-import type { VaultProject, VaultTask, Priority } from '../vault/types.js'
-import { isBlocked } from '../vault/task.js'
+import type { VaultProject, VaultTask, Priority } from '../../vault/types.js'
+import { isBlocked } from '../../vault/task.js'
 
 export interface TaskPlan {
   task: VaultTask

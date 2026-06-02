@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Command } from 'commander'
 import type { FeatureDef, FeatureContext } from '../infra/feature-map.js'
 import type { NotificationBus } from '../notifications/bus.js'
-import type { AgentResult } from '../pm/executor.js'
+import type { AgentResult } from '../pm/engine/index.js'
 import type { VaultProject } from '../vault/types.js'
 
 export interface HttpRoute {

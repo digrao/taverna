@@ -1,6 +1,6 @@
-import type { TavernaConfig } from '../config.js'
-import type { VaultProject, ProjectType, RawFrontmatter } from '../vault/types.js'
-import { getString } from '../vault/frontmatter.js'
+import type { TavernaConfig } from '../../config.js'
+import type { VaultProject, ProjectType, RawFrontmatter } from '../../vault/types.js'
+import { getString } from '../../vault/frontmatter.js'
 
 export type ComposeMode = 'inherit' | 'override'
 

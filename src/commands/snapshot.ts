@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { CommandDef } from './types.js'
 import { scanVault } from '../vault/index.js'
-import { computeHealth, snapshot } from '../pm/loki.js'
+import { computeHealth, snapshot } from '../pm/observability/index.js'
 
 export const snapshotCommands: CommandDef[] = [
   {

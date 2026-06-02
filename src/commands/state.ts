@@ -1,8 +1,8 @@
 import type { CommandDef, TavernaContext } from './types.js'
 import { scanVault } from '../vault/index.js'
-import { computeHealth } from '../pm/loki.js'
-import { getDailyCosts, loadVaultBudgetConfig, getBudgetStatus } from '../pm/budget.js'
-import { getActiveRuns } from '../pm/active.js'
+import { computeHealth } from '../pm/observability/index.js'
+import { getDailyCosts, loadVaultBudgetConfig, getBudgetStatus } from '../pm/observability/index.js'
+import { getActiveRuns } from '../pm/observability/index.js'
 
 function scanFor(ctx: TavernaContext) {
   return ctx.scan ? ctx.scan() : scanVault(ctx.config)

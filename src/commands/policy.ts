@@ -6,9 +6,9 @@ import {
   readProjectPolicy,
   mergePolicy,
   getTypePolicy,
-} from '../pm/policies.js'
-import { computeHealth } from '../pm/loki.js'
-import { resolvePolicy } from '../pm/policy-resolver.js'
+} from '../pm/scheduling/index.js'
+import { computeHealth } from '../pm/observability/index.js'
+import { resolvePolicy } from '../pm/scheduling/index.js'
 import type { VaultProject } from '../vault/types.js'
 
 const FREQ_LABEL: Record<string, string> = {

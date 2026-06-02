@@ -13,8 +13,8 @@ export const promptCommands: CommandDef[] = [
     params: { id: z.string().describe('Project ID') },
     http: { method: 'GET', path: '/api/prompt/:id' },
     handler: async ({ id }, ctx) => {
-      const { runSession } = await import('../pm/executor.js')
-      const { planSession } = await import('../pm/session-planner.js')
+      const { runSession } = await import('../pm/engine/executor.js')
+      const { planSession } = await import('../pm/scheduling/session-planner.js')
       const state = await scanFor(ctx)
       const project = state.projects.find((p) => p.id === id || p.name === id)
       if (!project) throw new Error(`project "${String(id)}" not found`)
@@ -51,7 +51,7 @@ export const promptCommands: CommandDef[] = [
     params: { id: z.string().describe('Project ID') },
     http: { method: 'GET', path: '/api/prompt/:id/history' },
     handler: async ({ id }) => {
-      const { listPromptHistory } = await import('../pm/prompt-store.js')
+      const { listPromptHistory } = await import('../pm/prompt/prompt-store.js')
       return listPromptHistory(String(id))
     },
   },
@@ -66,7 +66,7 @@ export const promptCommands: CommandDef[] = [
     },
     http: { method: 'GET', path: '/api/prompt/:id/diff' },
     handler: async ({ id, a, b }) => {
-      const { getPromptSnapshot, diffPromptTexts } = await import('../pm/prompt-store.js')
+      const { getPromptSnapshot, diffPromptTexts } = await import('../pm/prompt/prompt-store.js')
       const snapA = getPromptSnapshot(String(id), String(a))
       const snapB = getPromptSnapshot(String(id), String(b))
       if (!snapA) throw new Error(`snapshot "${String(a)}" not found for ${String(id)}`)

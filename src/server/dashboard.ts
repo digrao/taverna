@@ -1,5 +1,5 @@
 import type { VaultProject } from '../vault/types.js'
-import { computeHealth } from '../pm/loki.js'
+import { computeHealth } from '../pm/observability/index.js'
 
 function relativeTime(iso?: string): string {
   if (!iso) return '—'
