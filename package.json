@@ -1,6 +1,6 @@
 {
   "name": "taverna",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Vault-first project orchestrator",
   "license": "MIT",
   "author": "João Victor Miranda",
