@@ -1,0 +1,25 @@
+import { readdir } from 'node:fs/promises'
+import { join } from 'node:path'
+import type { TavernaContext } from './types.js'
+import { emitEvent } from '../pm/event-bus.js'
+
+export async function emitInsights(
+  _params: Record<string, unknown>,
+  ctx: TavernaContext,
+): Promise<{ inbox: number; zettelkasten: number; projects: number }> {
+  const [inboxEntries, zettelEntries, projectEntries] = await Promise.all([
+    readdir(join(ctx.vaultPath, '00_Inbox'), { withFileTypes: true }),
+    readdir(join(ctx.vaultPath, '00_Zettelkasten'), { withFileTypes: true }),
+    readdir(join(ctx.vaultPath, '10_Projects'), { withFileTypes: true }),
+  ])
+
+  const counts = {
+    inbox: inboxEntries.filter((e) => e.isFile()).length,
+    zettelkasten: zettelEntries.filter((e) => e.isFile()).length,
+    projects: projectEntries.filter((e) => e.isDirectory()).length,
+  }
+
+  emitEvent({ event: 'vault_snapshot', ...counts })
+
+  return counts
+}

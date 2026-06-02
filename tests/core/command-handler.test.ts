@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { CommandRegistry, type CommandContext } from '../../dist/core/command-handler.js'
+import { CommandRegistry, type CommandContext } from '../../dist/commands/types.js'
 import { defineConfig } from '../../dist/config.js'
 
 describe('Command Registry', () => {
