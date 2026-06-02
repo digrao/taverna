@@ -149,7 +149,7 @@ export async function scaffoldProject(
   await mkdir(join(folderPath, 'assets'), { recursive: true })
   await mkdir(join(folderPath, 'entregas'), { recursive: true })
 
-  await writeFile(join(folderPath, `${input.id}.md`), buildProjectMd(input), 'utf8')
+  await writeFile(join(folderPath, 'README.md'), buildProjectMd(input), 'utf8')
   await writeFile(join(folderPath, 'Logbook.md'), LOGBOOK_MD, 'utf8')
   await writeFile(join(folderPath, 'Progresso.md'), buildProgressoMd(input), 'utf8')
   await writeFile(join(folderPath, 'Material.md'), buildMaterialMd(input), 'utf8')

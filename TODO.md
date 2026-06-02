@@ -34,8 +34,11 @@ The union type (`USPProject | BBProject | MetaProject`) is gone — `VaultProjec
 
 ### Project entrypoints (task 47, depends on 30)
 
-- [ ] Migrate `$id.md` / `$id/$id.md` → `$id/README.md` with one-shot script
-- [ ] Update `scanProjects()` to expect `README.md` as the single entrypoint (keep `$id.md` fallback during transition)
+- [ ] Migrate existing `$id/$id.md` files in vault → `README.md` with one-shot script
+- [x] Update `scanProjects()` to expect `README.md` as the single entrypoint (keep `$id.md` fallback during transition)
+- [x] `scaffoldProject()` now writes `README.md` as entrypoint
+- [x] Projects are directory-only; loose `.md` files are no longer scanned
+- [x] `isGitRepo` flag: detected from `.git` presence; git tools inferred automatically by policy-resolver
 
 ---
 

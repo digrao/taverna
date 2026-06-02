@@ -183,7 +183,7 @@ describe('addTask', () => {
 // ── scaffoldProject ─────────────────────────────────────────────────────────────
 
 describe('scaffoldProject', () => {
-  it('creates full project structure', async () => {
+  it('creates full project structure with README.md as entrypoint', async () => {
     const result = await scaffoldProject(tmpDir, {
       id: 'PSI3471',
       name: 'Circuitos Elétricos',
@@ -194,7 +194,8 @@ describe('scaffoldProject', () => {
     expect(result.id).toBe('PSI3471')
 
     const root = join(tmpDir, 'PSI3471')
-    expect(existsSync(join(root, 'PSI3471.md'))).toBe(true)
+    expect(existsSync(join(root, 'README.md'))).toBe(true)
+    expect(existsSync(join(root, 'PSI3471.md'))).toBe(false)
     expect(existsSync(join(root, 'Logbook.md'))).toBe(true)
     expect(existsSync(join(root, 'Progresso.md'))).toBe(true)
     expect(existsSync(join(root, 'Material.md'))).toBe(true)
@@ -204,7 +205,7 @@ describe('scaffoldProject', () => {
     expect(existsSync(join(root, 'entregas'))).toBe(true)
   })
 
-  it('writes correct frontmatter in project .md', async () => {
+  it('writes correct frontmatter in README.md', async () => {
     await scaffoldProject(tmpDir, {
       id: 'PSI3471',
       name: 'Circuitos Elétricos',
@@ -213,7 +214,7 @@ describe('scaffoldProject', () => {
       edisciplinas: 'https://edisciplinas.usp.br/course/view.php?id=99999',
     })
 
-    const content = readFileSync(join(tmpDir, 'PSI3471', 'PSI3471.md'), 'utf8')
+    const content = readFileSync(join(tmpDir, 'PSI3471', 'README.md'), 'utf8')
     expect(content).toContain('id: PSI3471')
     expect(content).toContain('tipo: USP')
     expect(content).toContain('priority: high')
@@ -224,7 +225,7 @@ describe('scaffoldProject', () => {
 
   it('defaults agent to @dev-agent for tipo *', async () => {
     await scaffoldProject(tmpDir, { id: 'myproject', name: 'My Project', tipo: '*' })
-    const content = readFileSync(join(tmpDir, 'myproject', 'myproject.md'), 'utf8')
+    const content = readFileSync(join(tmpDir, 'myproject', 'README.md'), 'utf8')
     expect(content).toContain("agent: '@dev-agent'")
   })
 
@@ -237,7 +238,7 @@ describe('scaffoldProject', () => {
       contatos: ['[[Prof. Silva]]'],
     })
 
-    const content = readFileSync(join(tmpDir, 'PSI3471', 'PSI3471.md'), 'utf8')
+    const content = readFileSync(join(tmpDir, 'PSI3471', 'README.md'), 'utf8')
     expect(content).toContain('horarios:')
     expect(content).toContain('dia: segunda')
     expect(content).toContain('hora: 8h00')

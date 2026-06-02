@@ -254,19 +254,32 @@ describe('readProjectTasks', () => {
 // ── Group D: project scanning ─────────────────────────────────────────────────
 
 describe('scanProjects', () => {
-  it('finds loose .md files in projects dir', async () => {
-    write('10_Projects/MyProject.md', '---\nid: MyProject\ntype: personal\n---\n# My Project')
+  it('finds folder projects via README.md', async () => {
+    write('10_Projects/PSI3451/README.md', '---\nid: PSI3451\ntype: study\n---\n# PSI3451')
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
-    expect(projects.some((p) => p.id === 'MyProject')).toBe(true)
+    expect(projects.some((p) => p.id === 'PSI3451')).toBe(true)
   })
 
-  it('finds folder projects (folder/Folder.md pattern)', async () => {
+  it('falls back to <id>.md when README.md absent (legacy transition)', async () => {
     write('10_Projects/PSI3451/PSI3451.md', '---\nid: PSI3451\ntype: study\n---\n# PSI3451')
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
     expect(projects.some((p) => p.id === 'PSI3451')).toBe(true)
   })
 
-  it('ignores folders without matching .md file', async () => {
+  it('prefers README.md over <id>.md when both exist', async () => {
+    write('10_Projects/MyProj/README.md', '---\nid: from-readme\n---\n# via README')
+    write('10_Projects/MyProj/MyProj.md', '---\nid: from-legacy\n---\n# via legacy')
+    const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
+    expect(projects.find((p) => p.name === 'MyProj')!.id).toBe('from-readme')
+  })
+
+  it('ignores loose .md files — only directories are scanned', async () => {
+    write('10_Projects/Loose.md', '---\nid: Loose\n---\n# Loose')
+    const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
+    expect(projects.some((p) => p.id === 'Loose')).toBe(false)
+  })
+
+  it('ignores folders without any entrypoint .md file', async () => {
     mkdirSync(join(tmpDir, '10_Projects', 'EmptyFolder'), { recursive: true })
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
     expect(projects.some((p) => p.name === 'EmptyFolder')).toBe(false)
@@ -279,7 +292,7 @@ describe('scanProjects', () => {
   })
 
   it('sets hasTasksFolder true when tasks/ exists', async () => {
-    write('10_Projects/PSI3451/PSI3451.md', '---\nid: PSI3451\n---\n# PSI3451')
+    write('10_Projects/PSI3451/README.md', '---\nid: PSI3451\n---\n# PSI3451')
     write('10_Projects/PSI3451/tasks/1.md', '---\nprogresso: 0%\n---\n# Task')
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
     const p = projects.find((p) => p.id === 'PSI3451')!
@@ -287,15 +300,30 @@ describe('scanProjects', () => {
   })
 
   it('sets hasAssetsFolder true when assets/ exists', async () => {
-    write('10_Projects/PSI3451/PSI3451.md', '---\nid: PSI3451\n---\n# PSI3451')
+    write('10_Projects/PSI3451/README.md', '---\nid: PSI3451\n---\n# PSI3451')
     mkdirSync(join(tmpDir, '10_Projects', 'PSI3451', 'assets'), { recursive: true })
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
     const p = projects.find((p) => p.id === 'PSI3451')!
     expect(p.hasAssetsFolder).toBe(true)
   })
 
+  it('sets isGitRepo true when .git exists in project folder', async () => {
+    write('10_Projects/my-tool/README.md', '---\nid: my-tool\n---\n# My Tool')
+    mkdirSync(join(tmpDir, '10_Projects', 'my-tool', '.git'), { recursive: true })
+    const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
+    const p = projects.find((p) => p.id === 'my-tool')!
+    expect(p.isGitRepo).toBe(true)
+  })
+
+  it('sets isGitRepo false when .git absent', async () => {
+    write('10_Projects/PSI3451/README.md', '---\nid: PSI3451\n---\n# PSI3451')
+    const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
+    const p = projects.find((p) => p.id === 'PSI3451')!
+    expect(p.isGitRepo).toBe(false)
+  })
+
   it('returns tasks: [] when tasks/ folder does not exist', async () => {
-    write('10_Projects/PSI3451/PSI3451.md', '---\nid: PSI3451\n---\n# PSI3451')
+    write('10_Projects/PSI3451/README.md', '---\nid: PSI3451\n---\n# PSI3451')
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
     const p = projects.find((p) => p.id === 'PSI3451')!
     expect(p.tasks).toEqual([])
@@ -303,30 +331,28 @@ describe('scanProjects', () => {
   })
 
   it('uses id from frontmatter, falls back to folder name', async () => {
-    write('10_Projects/MyFolder/MyFolder.md', '---\nid: explicit-id\n---\n# Project')
-    write('10_Projects/NoId/NoId.md', '---\n---\n# No ID')
+    write('10_Projects/MyFolder/README.md', '---\nid: explicit-id\n---\n# Project')
+    write('10_Projects/NoId/README.md', '---\n---\n# No ID')
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
     expect(projects.some((p) => p.id === 'explicit-id')).toBe(true)
     expect(projects.some((p) => p.id === 'NoId')).toBe(true)
   })
 
-  it('loose .md has folderPath undefined', async () => {
-    write('10_Projects/Loose.md', '---\nid: Loose\n---\n# Loose')
+  it('all directory projects have folderPath set', async () => {
+    write('10_Projects/PSI3451/README.md', '---\nid: PSI3451\n---\n# PSI3451')
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
-    const p = projects.find((p) => p.id === 'Loose')!
-    expect(p.folderPath).toBeUndefined()
-    expect(p.hasTasksFolder).toBe(false)
-    expect(p.hasAssetsFolder).toBe(false)
+    const p = projects.find((p) => p.id === 'PSI3451')!
+    expect(p.folderPath).toBeDefined()
   })
 
   it('USP project has tipo USP', async () => {
-    write('10_Projects/PSI3451/PSI3451.md', '---\nid: PSI3451\n---\n# PSI3451')
+    write('10_Projects/PSI3451/README.md', '---\nid: PSI3451\n---\n# PSI3451')
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
     expect(projects.find((p) => p.id === 'PSI3451')!.tipo).toBe('USP')
   })
 
   it('work project has tipo BB', async () => {
-    write('10_Projects/Proj.md', '---\nid: BB1\ntype: work\n---\n# BB Project')
+    write('10_Projects/Proj/README.md', '---\nid: BB1\ntype: work\n---\n# BB Project')
     const projects = await scanProjects(join(tmpDir, '10_Projects'), ['PSI', 'PEA', 'PEF'])
     expect(projects.find((p) => p.id === 'BB1')!.tipo).toBe('BB')
   })
@@ -689,18 +715,18 @@ describe('scanVault (end-to-end fixture)', () => {
   it('returns correct VaultState with all project types and agents', async () => {
     // USP project
     write(
-      '10_Projects/PSI9999/PSI9999.md',
+      '10_Projects/PSI9999/README.md',
       '---\nid: PSI9999\nagent: "@study-assistant"\npriority: high\nrun_every: daily\n---\n# PSI9999',
     )
     write('10_Projects/PSI9999/tasks/t1.md', '---\nprogresso: 0%\nprioridade: alta\n---\n# Task 1')
 
-    // BB project (loose file)
+    // BB project (directory)
     write(
-      '10_Projects/BB-Work.md',
+      '10_Projects/BB-Work/README.md',
       '---\nid: BB-Work\ntype: work\nagent: "@planner"\npriority: medium\n---\n# BB Work',
     )
 
-    // Meta project
+    // Meta project (legacy entrypoint — still discovered)
     write(
       '10_Projects/mytool/mytool.md',
       '---\nid: mytool\ntype: dev\nagent: "@planner"\npriority: low\n---\n# mytool',
@@ -722,10 +748,11 @@ describe('scanVault (end-to-end fixture)', () => {
     const usp = state.projects.find((p) => p.id === 'PSI9999')!
     expect(usp.tipo).toBe('USP')
     expect(usp.tasks).toHaveLength(1)
+    expect(usp.folderPath).toBeDefined()
 
     const bb = state.projects.find((p) => p.id === 'BB-Work')!
     expect(bb.tipo).toBe('BB')
-    expect(bb.folderPath).toBeUndefined()
+    expect(bb.folderPath).toBeDefined()
 
     const meta = state.projects.find((p) => p.id === 'mytool')!
     expect(meta.tipo).toBe('*')

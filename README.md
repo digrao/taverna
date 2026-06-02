@@ -4,6 +4,8 @@ A headless orchestrator that reads projects from an Obsidian vault, builds conte
 
 The core metaphor is a **deadpool board**: projects are contracts, agents are specialists, and the scheduler assigns work to whoever is eligible. A `@dev-agent` works on software, a `@study-assistant` processes course material. Everything runs in the background via systemd, observable through an HTTP dashboard.
 
+> *Vontade é a condição necessária e suficiente para fazer a realidade.*
+
 ## Quick start
 
 ### 1 — Install
@@ -39,9 +41,9 @@ Taverna expects this layout inside the vault:
 
 ```
 my-vault/
-  10_Projects/        ← one folder per project
+  10_Projects/        ← one directory per project
   60_Agents/
-    1_Directives/     ← agent instruction files
+    1_Directives/     ← agent instruction folders
     2_Logbooks/       ← auto-created by taverna
 ```
 
@@ -49,7 +51,7 @@ my-vault/
 
 ### 3 — Create a project
 
-Each project is a Markdown file with frontmatter in `10_Projects/<id>/<id>.md`:
+Each project is a directory containing a `README.md` with frontmatter in `10_Projects/<id>/README.md`:
 
 ```markdown
 ---
@@ -85,11 +87,26 @@ progresso: 0
 Detailed instructions for the agent.
 ```
 
+#### Collaborative projects
+
+A project directory can be its own git repository — or registered as a git submodule in the vault:
+
+```bash
+# init a project as a standalone repo
+cd 10_Projects/my-project && git init && git remote add origin <url>
+
+# register it as a submodule (optional, for shared vaults)
+cd my-vault && git submodule add <url> 10_Projects/my-project
+```
+
+When a project directory contains a `.git` entry, taverna marks it as `isGitRepo: true` and infers git tool permissions for the agent automatically.
+
 ---
 
 ### 4 — Create an agent directive
 
-Directives live in `60_Agents/1_Directives/@<name>.md`:
+Directives live in `60_Agents/1_Directives/<name>/directives.md`.
+Agents **must** declare explicit `permissions:` — this is the security boundary for what tools the agent may invoke:
 
 ```markdown
 ---
@@ -100,13 +117,17 @@ permissions:
   - Read
   - Write
   - Edit
-  - Bash
+  - Bash(git add *)
+  - Bash(git commit *)
+  - Bash(git push *)
 ---
 
 # Instructions
 
 You implement the next pending task. Validate locally and push to the remote.
 ```
+
+Agents without `permissions:` run in bypass mode (all tools allowed). Prefer the explicit list.
 
 ---
 

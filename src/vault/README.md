@@ -38,16 +38,27 @@ progresso == 100  → concluida
 
 ```
 10_Projects/<id>/
-  <id>.md              ← frontmatter do projeto (agent:, id:, type:, ...)
+  README.md            ← entrypoint do projeto (frontmatter: agent:, id:, tipo:, ...)
   tasks/
     tarefa-1.md        ← frontmatter com progresso:, status:
+    archive/           ← tasks concluídas
   assets/
-    arquivo.pdf.asset  ← ponteiro (Phase 2A)
-    arquivo.pdf        ← gitignored, baixado on-demand
+  .git/                ← opcional: projeto é um repositório git (isGitRepo: true)
+
+  # Fallback legado (ainda suportado durante migração):
+  <id>.md              ← usado se README.md não existir
 
 60_Agents/
   1_Directives/
-    @agente.md         ← instruções do agente
+    <name>/
+      directives.md    ← frontmatter com name:, permissions:, runner:
   2_Logbooks/
-    @agente.md         ← append-only, execuções cronológicas
+    <name>.md          ← append-only, execuções cronológicas
 ```
+
+## Política de projetos
+
+- Todo projeto é um **diretório** — arquivos `.md` soltos em `10_Projects/` não são mais escaneados.
+- O entrypoint é sempre `README.md`. O fallback `<id>.md` existe apenas para compatibilidade durante a migração.
+- Todo agente deveria declarar `permissions:` explícito. Sem `permissions:`, o agente roda em modo bypass (todas as ferramentas permitidas).
+- Um projeto pode ser um repositório git independente (com `.git/` na pasta). Taverna detecta isso e seta `isGitRepo: true`, e o `policy-resolver` infere permissões git automaticamente.

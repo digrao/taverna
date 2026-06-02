@@ -44,14 +44,8 @@ export async function readProject(filePath: string, uspPrefixes: string[]): Prom
   const raw = await readFile(filePath, 'utf8')
   const { data, content } = parseFrontmatter(raw)
 
-  const folderPath =
-    existsSync(join(dirname(filePath), 'tasks')) || existsSync(join(dirname(filePath), 'assets'))
-      ? dirname(filePath)
-      : undefined
-
-  // Use folder/file name for type detection (strip leading path)
-  const stem = basename(filePath, '.md')
-  const detectionName = folderPath ? basename(folderPath) : stem
+  const folderPath = dirname(filePath)
+  const detectionName = basename(folderPath)
 
   const id = getString(data, 'id') ?? detectionName
   const tipo = detectProjectType(detectionName, data, uspPrefixes)
@@ -65,12 +59,10 @@ export async function readProject(filePath: string, uspPrefixes: string[]): Prom
     lastStatusRaw === 'success' || lastStatusRaw === 'failed' ? lastStatusRaw : undefined
   const runsTotal = typeof data['_runs_total'] === 'number' ? data['_runs_total'] : 0
 
-  const resolvedFolderPath = folderPath
-
-  const hasTasksFolder = resolvedFolderPath != null && existsSync(join(resolvedFolderPath, 'tasks'))
-  const hasAssetsFolder =
-    resolvedFolderPath != null && existsSync(join(resolvedFolderPath, 'assets'))
-  const tasks = resolvedFolderPath != null ? await readProjectTasks(resolvedFolderPath) : []
+  const hasTasksFolder = existsSync(join(folderPath, 'tasks'))
+  const hasAssetsFolder = existsSync(join(folderPath, 'assets'))
+  const isGitRepo = existsSync(join(folderPath, '.git'))
+  const tasks = await readProjectTasks(folderPath)
 
   const hostname = getString(data, 'hostname')
   const workspaceDir = getString(data, 'workspace_dir') ?? getString(data, 'workspaceDir')
@@ -100,7 +92,7 @@ export async function readProject(filePath: string, uspPrefixes: string[]): Prom
     tipo,
     name: detectionName,
     filePath,
-    ...(resolvedFolderPath != null ? { folderPath: resolvedFolderPath } : {}),
+    folderPath,
     priority,
     ...(agent != null ? { agent } : {}),
     ...(pipelineRaw.length > 0 ? { pipeline: pipelineRaw } : {}),
@@ -111,6 +103,7 @@ export async function readProject(filePath: string, uspPrefixes: string[]): Prom
     tasks,
     hasTasksFolder,
     hasAssetsFolder,
+    isGitRepo,
     content,
     raw: data,
     ...(hostname ? { hostname } : {}),
@@ -136,17 +129,18 @@ export async function scanProjects(
     if (entry.startsWith('.')) continue
     const fullPath = join(projectsDir, entry)
     const s = await stat(fullPath).catch(() => null)
-    if (!s) continue
+    if (!s?.isDirectory()) continue
 
-    if (s.isFile() && entry.endsWith('.md')) {
-      // Loose .md file
-      projects.push(await readProject(fullPath, uspPrefixes))
-    } else if (s.isDirectory()) {
-      // Folder project: must have folder/Folder.md
-      const mainFile = join(fullPath, `${entry}.md`)
-      if (existsSync(mainFile)) {
-        projects.push(await readProject(mainFile, uspPrefixes))
-      }
+    // Prefer README.md; fall back to <id>.md for projects not yet migrated
+    const readmePath = join(fullPath, 'README.md')
+    const legacyPath = join(fullPath, `${entry}.md`)
+    const mainFile = existsSync(readmePath)
+      ? readmePath
+      : existsSync(legacyPath)
+        ? legacyPath
+        : null
+    if (mainFile) {
+      projects.push(await readProject(mainFile, uspPrefixes))
     }
   }
 
