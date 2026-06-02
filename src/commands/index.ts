@@ -25,6 +25,7 @@ export { archiveCommands } from './archive.js'
 export { insightsCommands } from './insights.js'
 export { policyCommands } from './policy.js'
 export { statusCommands } from './status-cmd.js'
+export { syncCommands } from './sync.js'
 
 // CLI helpers (direct function exports, called by cli.ts)
 export { executeRun } from './run.js'
@@ -36,6 +37,7 @@ export { showTaskStatus } from './status-cmd.js'
 export { archiveTask } from './archive.js'
 export { emitInsights } from './insights.js'
 export { runWork } from './work.js'
+export { runSync } from './sync.js'
 
 import { stateCommands } from './state.js'
 import { projectsCommands } from './projects.js'
@@ -52,6 +54,7 @@ import { archiveCommands } from './archive.js'
 import { insightsCommands } from './insights.js'
 import { policyCommands } from './policy.js'
 import { statusCommands } from './status-cmd.js'
+import { syncCommands } from './sync.js'
 import type { CommandDef } from './types.js'
 
 /** All commands.
@@ -78,4 +81,5 @@ export const allCommands: CommandDef[] = [
   ...insightsCommands,
   ...policyCommands,
   ...statusCommands,
+  ...syncCommands,
 ]

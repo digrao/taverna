@@ -61,7 +61,12 @@ export async function readProject(filePath: string, uspPrefixes: string[]): Prom
 
   const hasTasksFolder = existsSync(join(folderPath, 'tasks'))
   const hasAssetsFolder = existsSync(join(folderPath, 'assets'))
-  const isGitRepo = existsSync(join(folderPath, '.git'))
+  const gitEntry = join(folderPath, '.git')
+  const isGitRepo = existsSync(gitEntry)
+  const gitEntryStat = isGitRepo ? await stat(gitEntry).catch(() => null) : null
+  // In git submodules the .git entry is a file (pointing to the parent .git/modules/),
+  // not a directory as in regular repos.
+  const isSubmodule = gitEntryStat?.isFile() ?? false
   const tasks = await readProjectTasks(folderPath)
 
   const hostname = getString(data, 'hostname')
@@ -104,6 +109,7 @@ export async function readProject(filePath: string, uspPrefixes: string[]): Prom
     hasTasksFolder,
     hasAssetsFolder,
     isGitRepo,
+    isSubmodule,
     content,
     raw: data,
     ...(hostname ? { hostname } : {}),

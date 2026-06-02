@@ -78,6 +78,7 @@ export interface VaultProject {
   hasTasksFolder: boolean
   hasAssetsFolder: boolean
   isGitRepo: boolean
+  isSubmodule: boolean
   content: string
   raw: RawFrontmatter
   // multi-host scheduling

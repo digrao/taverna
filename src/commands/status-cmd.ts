@@ -1,7 +1,13 @@
+import { spawnSync } from 'node:child_process'
 import { z } from 'zod'
 import type { CommandDef, TavernaContext } from './types.js'
 import { scanVault } from '../vault/index.js'
 import { isBlocked, hasCycle, resolveDependency } from '../vault/task.js'
+
+function git(cwd: string, args: string[]): { ok: boolean; stdout: string } {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8' })
+  return { ok: r.status === 0, stdout: r.stdout?.trim() ?? '' }
+}
 
 export async function showTaskStatus(
   params: { projectId: string },
@@ -35,6 +41,24 @@ export async function showTaskStatus(
         `${task.filePath.replace(ctx.vaultPath + '/', '')}  [${pct}%] BLOCKED por: ${depList}`,
       )
     }
+  }
+
+  if (project.isSubmodule && project.folderPath) {
+    const dir = project.folderPath
+    const hashRes = git(dir, ['rev-parse', '--short', 'HEAD'])
+    const hash = hashRes.ok ? hashRes.stdout : '?'
+    const isDirty = !git(dir, ['diff', '--quiet', 'HEAD']).ok
+
+    // prefix from `git submodule status`: '+' = ahead of parent's recorded SHA, ' ' = in sync
+    const subRes = git(ctx.vaultPath, ['submodule', 'status', '--', dir])
+    const prefix = subRes.stdout[0] ?? ' '
+    const syncState =
+      prefix === '+' ? 'ahead of parent record (run git add to update)' : 'in sync with parent'
+
+    console.log('')
+    console.log('[submodule]')
+    console.log(`  commit: ${hash}${isDirty ? ' (dirty)' : ''}`)
+    console.log(`  sync:   ${syncState}`)
   }
 }
 
