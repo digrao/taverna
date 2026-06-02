@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { buildPrompt, buildSessionPrompt } from '../src/pm/prompt/prompt.js'
-import { parseResultado, runAgent, runPipeline, runSession } from '../src/pm/engine/executor.js'
-import { buildLogtaskContent } from '../src/pm/prompt/session.js'
+import { buildPrompt, buildSessionPrompt } from '../src/manager/prompt/prompt.js'
+import {
+  parseResultado,
+  runAgent,
+  runPipeline,
+  runSession,
+} from '../src/manager/engine/executor.js'
+import { buildLogtaskContent } from '../src/manager/prompt/session.js'
 import type { VaultAgent, VaultProject, VaultTask } from '../src/vault/types.js'
 
 const mockAgent: VaultAgent = {

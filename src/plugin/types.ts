@@ -1,10 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Command } from 'commander'
-import type { FeatureDef, FeatureContext } from '../infra/feature-map.js'
+import type { CommandDef, TavernaContext } from '../core/types.js'
 import type { NotificationBus } from '../notifications/bus.js'
-import type { AgentResult } from '../pm/engine/index.js'
+import type { AgentResult } from '../manager/engine/index.js'
 import type { VaultProject } from '../vault/types.js'
-import type { SchedulingPlugins } from '../pm/scheduling/plugins.js'
+import type { SchedulingPlugins } from '../manager/scheduling/plugins.js'
 
 export interface HttpRoute {
   method: 'GET' | 'POST'
@@ -14,54 +14,41 @@ export interface HttpRoute {
 }
 
 /**
- * A taverna plugin contributes features (MCP tools + HTTP routes), optional CLI
- * commands, and optional scheduler lifecycle hooks.
+ * A taverna plugin contributes commands (HTTP + MCP), optional CLI commands,
+ * and optional scheduler lifecycle hooks.
  *
  * Minimal plugin example:
  *
  *   export default {
  *     name: 'my-plugin',
- *     features: [{ name: 'ping', description: '...', params: {}, httpMethod: 'GET',
- *                  handler: async () => ({ pong: true }) }],
+ *     commands: [{
+ *       id: 'ping', description: 'Health check', params: {},
+ *       http: { method: 'GET', path: '/api/my-plugin/ping' },
+ *       handler: async () => ({ ok: true }),
+ *     }],
  *   } satisfies TavernaPlugin
  */
 export interface TavernaPlugin {
-  /** Unique plugin name — used in logs and error messages */
   name: string
 
-  /** Features exposed as MCP tools and HTTP routes */
-  features?: FeatureDef[]
+  /** Commands exposed as MCP tools and HTTP routes (when http is set). */
+  commands?: CommandDef[]
 
-  /** Raw HTTP routes for serving non-JSON content (HTML, assets) */
+  /** Raw HTTP routes for serving non-JSON content (HTML, assets). */
   httpRoutes?: HttpRoute[]
 
-  /**
-   * Called once when the plugin is loaded, before any tick or command.
-   * Use to register notifiers, side-effects, or one-time setup.
-   */
+  /** Called once when the plugin is loaded. Use to register notification sinks. */
   onLoad?: (bus: NotificationBus) => void
 
-  /**
-   * Optional CLI commands this plugin contributes.
-   * Called with the root Commander program so the plugin can attach subcommands.
-   */
-  registerCommands?: (program: Command, ctx: FeatureContext) => void
+  /** Optional CLI commands this plugin contributes. */
+  registerCommands?: (program: Command, ctx: TavernaContext) => void
 
-  /**
-   * Called once at the start of each scheduler tick, before vault scan.
-   * Use for pre-tick sync work (e.g. clockify hours → project frontmatters).
-   */
-  beforeTick?: (ctx: FeatureContext) => Promise<void>
+  /** Called once at the start of each scheduler tick, before vault scan. */
+  beforeTick?: (ctx: TavernaContext) => Promise<void>
 
-  /**
-   * Called after each agent run completes (not called in dry-run mode).
-   * Use for post-run side effects (e.g. asset uploads, telemetry).
-   */
-  afterRun?: (result: AgentResult, project: VaultProject, ctx: FeatureContext) => Promise<void>
+  /** Called after each agent run completes (not called in dry-run mode). */
+  afterRun?: (result: AgentResult, project: VaultProject, ctx: TavernaContext) => Promise<void>
 
-  /**
-   * Override scoring, triage, or permission resolution for the scheduler.
-   * Each slot is optional — omitted slots use the built-in default.
-   */
+  /** Override scoring, triage, or permission resolution for the scheduler. */
   scheduling?: SchedulingPlugins
 }

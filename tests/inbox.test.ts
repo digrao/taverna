@@ -3,7 +3,12 @@ import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { scanInbox, selectBatch, buildPrompt, parseClassifications } from '../src/inbox/process.js'
+import {
+  scanInbox,
+  selectBatch,
+  buildPrompt,
+  parseClassifications,
+} from '../src/vault/inbox/process.js'
 
 let tmpDir: string
 

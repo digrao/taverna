@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { triage } from '../src/pm/scheduling/triage.js'
+import { triage } from '../src/manager/scheduling/triage.js'
 import type { VaultTask, VaultProject } from '../src/vault/types.js'
 
 function makeTask(overrides: Partial<VaultTask> = {}): VaultTask {

@@ -1,14 +1,18 @@
+import { createRequire } from 'node:module'
+import { join } from 'node:path'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
-import { join } from 'node:path'
+import { allCommands } from '../core/index.js'
+import type { TavernaContext } from '../core/types.js'
+import { loadConfig } from '../config.js'
+import { loadPluginCommands } from '../plugin/loader.js'
+import { notificationBus } from '../notifications/bus.js'
 import { addTask } from '../vault/task-scaffold.js'
 import { scaffoldProject } from '../vault/project-scaffold.js'
-import { features } from '../infra/feature-map.js'
-import type { FeatureContext, FeatureDef } from '../infra/feature-map.js'
-import { loadConfig } from '../config.js'
-import { loadPluginFeatures } from '../plugin/loader.js'
-import { notificationBus } from '../notifications/bus.js'
+
+const _req = createRequire(import.meta.url)
+const { version } = _req('../../package.json') as { version: string }
 
 // stdout is the MCP protocol channel — never write there directly
 const log = (...args: unknown[]) => process.stderr.write(args.join(' ') + '\n')
@@ -17,11 +21,7 @@ const config = loadConfig()
 const VAULT_PATH = config.vaultPath
 const PROJECTS_DIR = join(VAULT_PATH, '10_Projects')
 
-const ctx: FeatureContext = {
-  vaultPath: VAULT_PATH,
-  config,
-  notificationBus,
-}
+const ctx: TavernaContext = { vaultPath: VAULT_PATH, config, notificationBus }
 
 function ok(data: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
@@ -31,21 +31,22 @@ function err(message: string) {
   return { content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }] }
 }
 
-const server = new McpServer({ name: 'taverna', version: '0.1.0' })
+const server = new McpServer({ name: 'taverna', version })
 
-// ── Auto-registered feature tools ──────────────────────────────────────────────
-// Core features + plugin features all become taverna_<name> MCP tools.
+// ── Auto-registered commands ────────────────────────────────────────────────────
+// All HTTP-exposed core commands + plugin commands become taverna_<id> MCP tools.
 
-const allFeatures: FeatureDef[] = [...features, ...(await loadPluginFeatures())]
+const pluginCommands = await loadPluginCommands()
+const exposed = [...allCommands, ...pluginCommands].filter((c) => c.http !== undefined)
 
-for (const feature of allFeatures) {
+for (const cmd of exposed) {
   server.tool(
-    `taverna_${feature.name}`,
-    feature.description,
-    feature.params,
+    `taverna_${cmd.id}`,
+    cmd.description,
+    cmd.params ?? {},
     async (params: Record<string, unknown>) => {
       try {
-        const result = await feature.handler(params, ctx)
+        const result = await cmd.handler(params, ctx)
         return ok(result)
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e))
@@ -54,9 +55,8 @@ for (const feature of allFeatures) {
   )
 }
 
-// ── Scaffold tools ─────────────────────────────────────────────────────────────
-// These are not in the feature map — they have complex param schemas and are
-// vault-write operations that don't belong in the read/action feature registry.
+// ── Vault write tools ────────────────────────────────────────────────────────────
+// Complex write operations with discriminated schemas — registered separately.
 
 server.tool(
   'taverna_add_task',
@@ -69,15 +69,9 @@ server.tool(
     deadline: z.string().optional().describe('YYYY-MM-DD; required for USP-entrega'),
     body: z.string().optional().describe('Optional markdown body for generic tasks'),
     depende: z.array(z.string()).optional().describe('Task IDs this generic task depends on'),
-    assetFolder: z
-      .string()
-      .optional()
-      .describe('Relative asset folder name (e.g. 05_Aula); USP only'),
+    assetFolder: z.string().optional().describe('Relative asset folder (e.g. 05_Aula); USP only'),
     workspace: z.string().optional().describe('Workspace path; USP only'),
-    dependsOn: z
-      .array(z.string())
-      .optional()
-      .describe('Task IDs; USP only (use depende for generic)'),
+    dependsOn: z.array(z.string()).optional().describe('Task IDs; USP only'),
   },
   async ({
     projectId,
@@ -127,13 +121,7 @@ server.tool(
     priority: z.string().optional().describe('Project priority (high | medium | low)'),
     edisciplinas: z.string().optional().describe('e-Disciplinas course URL'),
     horarios: z
-      .array(
-        z.object({
-          dia: z.string(),
-          hora: z.string(),
-          local: z.string().optional(),
-        }),
-      )
+      .array(z.object({ dia: z.string(), hora: z.string(), local: z.string().optional() }))
       .optional(),
     contatos: z.array(z.string()).optional(),
   },
@@ -152,7 +140,7 @@ server.tool(
   },
 )
 
-// ── Connect ────────────────────────────────────────────────────────────────────
+// ── Connect ─────────────────────────────────────────────────────────────────────
 
 log(`taverna MCP server starting (vault: ${VAULT_PATH || '(VAULT_PATH not set)'})`)
 

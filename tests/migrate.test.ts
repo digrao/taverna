@@ -3,10 +3,10 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { scanArchive } from '../src/migrate/scan.js'
-import { buildMigratePrompt } from '../src/migrate/prompt.js'
-import { promote } from '../src/migrate/promote.js'
-import type { MigrationDraft } from '../src/migrate/types.js'
+import { scanArchive } from '../src/vault/migrate/scan.js'
+import { buildMigratePrompt } from '../src/vault/migrate/prompt.js'
+import { promote } from '../src/vault/migrate/promote.js'
+import type { MigrationDraft } from '../src/vault/migrate/types.js'
 
 let tmpDir: string
 
@@ -29,7 +29,7 @@ describe('scanArchive', () => {
 
     const notes = await scanArchive(tmpDir)
     expect(notes).toHaveLength(2)
-    expect(notes.map(n => n.filename).sort()).toEqual(['note1.md', 'note2.md'])
+    expect(notes.map((n) => n.filename).sort()).toEqual(['note1.md', 'note2.md'])
   })
 
   it('parses frontmatter from notes', async () => {
@@ -102,8 +102,20 @@ describe('promote', () => {
     run_every: 'weekly',
     body: '# Meu Projeto\n\nDescrição do projeto.',
     tasks: [
-      { id: 'setup', title: 'Setup inicial', prioridade: 'high', progresso: 0, body: 'Configurar o ambiente' },
-      { id: 'docs', title: 'Escrever docs', prioridade: 'low', progresso: 0, body: 'Documentar tudo' },
+      {
+        id: 'setup',
+        title: 'Setup inicial',
+        prioridade: 'high',
+        progresso: 0,
+        body: 'Configurar o ambiente',
+      },
+      {
+        id: 'docs',
+        title: 'Escrever docs',
+        prioridade: 'low',
+        progresso: 0,
+        body: 'Documentar tudo',
+      },
     ],
   }
 
@@ -122,7 +134,7 @@ describe('promote', () => {
   it('project file contains correct frontmatter', async () => {
     await promote(draft, tmpDir)
     const content = readFileSync(join(tmpDir, 'meu-projeto', 'meu-projeto.md'), 'utf8')
-    expect(content).toContain("id: meu-projeto")
+    expect(content).toContain('id: meu-projeto')
     expect(content).toContain("tipo: '*'")
     expect(content).toContain('priority: high')
     expect(content).toContain('run_every: weekly')

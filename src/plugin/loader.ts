@@ -41,14 +41,14 @@ export async function loadPlugins(): Promise<TavernaPlugin[]> {
   return plugins
 }
 
-export function collectPluginFeatures(plugins: TavernaPlugin[]) {
-  return plugins.flatMap((p) => p.features ?? [])
+export function collectPluginCommands(plugins: TavernaPlugin[]) {
+  return plugins.flatMap((p) => p.commands ?? [])
 }
 
 export function collectPluginRoutes(plugins: TavernaPlugin[]) {
   return plugins.flatMap((p) => p.httpRoutes ?? [])
 }
 
-export async function loadPluginFeatures() {
-  return collectPluginFeatures(await loadPlugins())
+export async function loadPluginCommands() {
+  return collectPluginCommands(await loadPlugins())
 }
