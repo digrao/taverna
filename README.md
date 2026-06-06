@@ -11,6 +11,6 @@ run_every: never
 
 > *Vontade é a condição necessária e suficiente para fazer a realidade.*
 
-Orquestrador de vault headless. Lê projetos de uma vault Obsidian, constrói prompts e despacha agentes (Claude Code) para trabalhar neles.
+Orquestrador de vault headless. Lê projetos de uma vault Obsidian.
 
-A metáfora é um **deadpool board**: projetos são contratos, agentes são especialistas, o scheduler atribui trabalho a quem é elegível.
+A metáfora é um **deadpool board**: projetos são como mesas, task são como contratos, agentes são mercenários, o scheduler atribui trabalho a quem é elegível com base nos canvas.
