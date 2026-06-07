@@ -31,7 +31,7 @@ Localizado o vault, o taverna lê `{vaultPath}/taverna.config.json`. Tudo mais v
   "flowDir": "20_Areas/2_Fluxos",
 
   // Porta do servidor HTTP (taverna serve)
-  "port": 2948,
+  "port": 3861,
 
   // Plugins ativos
   "plugins": [

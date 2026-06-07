@@ -57,8 +57,23 @@ GET  /api/<id>            → comando core
 POST /api/<id>            → comando core (write)
 GET  /api/<ns>/<id>       → comando de plugin
 POST /api/<ns>/<id>       → comando de plugin (write)
-GET  /events              → SSE — stream de eventos do taverna
+GET  /events              → SSE — stream de eventos do taverna (push, sem polling)
 ```
+
+Porta padrão: `3861`.
+
+### Ciclo de vida
+
+`taverna serve` deve rodar como **systemd service** (não timer) — processo persistente que reinicia automaticamente se cair:
+
+```ini
+# /etc/systemd/system/taverna.service
+[Service]
+ExecStart=taverna serve --vault /home/user/notas
+Restart=on-failure
+```
+
+Controle: `systemctl start|stop|status|enable taverna`.
 
 ---
 
