@@ -6,7 +6,13 @@ project: taverna
 progresso: 60
 ---
 
-Adaptadores expõem comandos core e de plugins via protocolo. Nenhum adaptador contém lógica de negócio — apenas mapeamento de entrada/saída e validação de params.
+Três modos de invocação independentes. Nenhum adaptador contém lógica de negócio.
+
+| Modo | Invocação | Ciclo de vida |
+|---|---|---|
+| CLI | `taverna <comando>` | single-shot, executa e sai |
+| HTTP | `taverna serve` | server persistente, opcional |
+| MCP | `taverna mcp` ou SSE via HTTP | stdio efêmero ou reutiliza o server HTTP |
 
 ---
 
@@ -62,14 +68,20 @@ GET  /events              → SSE — stream de eventos do taverna
 
 Todos os comandos com `expose` incluindo `'mcp'` viram MCP tools. O schema do tool é gerado a partir do `CommandDef.params` (JSON Schema).
 
-### Transport
-
-`stdio` — o processo do taverna fala MCP pelo stdin/stdout. Nunca escrever em stdout fora do protocolo MCP.
-
-### Formato
-
 Tool name: `taverna_<id>` (core) ou `taverna_<namespace>_<id>` (plugin).
 Input schema: derivado de `params`. Output: JSON serializado em `content[0].text`.
+
+### Transports
+
+**stdio** (`taverna mcp`) — o cliente MCP spawna o processo. Efêmero, vive enquanto durar a sessão. Nunca escrever em stdout fora do protocolo MCP.
+
+**HTTP SSE** — quando `taverna serve` está rodando, o mesmo conjunto de tools é acessível via SSE:
+```
+GET  /mcp/sse       → stream SSE (MCP over HTTP)
+POST /mcp/message   → envio de mensagens do cliente
+```
+
+O cliente escolhe o transport. Se o servidor HTTP estiver up, prefira SSE — evita spawnar um processo extra. Se não estiver, use stdio. Os dois expõem exatamente os mesmos tools; não há duplicação de lógica.
 
 ---
 
