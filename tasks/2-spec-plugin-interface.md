@@ -1,9 +1,9 @@
 ---
 id: 2-spec-plugin-interface
-title: "Spec: interface de plugins"
-status: 🧠
+title: 'Spec: interface de plugins'
+status: "\U0001F3D6️"
 project: taverna
-progresso: 80
+progresso: 100
 ---
 
 Contrato que um plugin deve implementar para estender o taverna.

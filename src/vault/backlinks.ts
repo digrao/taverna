@@ -20,47 +20,41 @@ function stemOf(filePath: string): string {
   return filePath.replace(/\.md$/, '').split('/').pop() ?? ''
 }
 
-export interface BacklinkResult {
-  source: string
-  sourceRelative: string
+function lineOf(content: string, index: number): number {
+  return content.slice(0, index).split('\n').length
 }
 
-export async function findBacklinks(
-  vaultPath: string,
-  notePath: string,
-): Promise<BacklinkResult[]> {
+export interface Backlink {
+  source: string
+  line: number
+}
+
+export async function findBacklinks(vaultPath: string, notePath: string): Promise<Backlink[]> {
   const noteStem = stemOf(notePath)
   const noteRelative = relative(vaultPath, notePath)
 
   const all = await walkMd(vaultPath)
-  const results: BacklinkResult[] = []
+  const results: Backlink[] = []
 
   for (const file of all) {
     if (file === notePath) continue
     const content = await readFile(file, 'utf8').catch(() => '')
-
-    let found = false
+    const source = relative(vaultPath, file)
 
     for (const m of content.matchAll(WIKILINK_RE)) {
       const target = m[1]!.trim()
       if (target === noteStem || target === noteRelative || target.endsWith('/' + noteStem)) {
-        found = true
-        break
+        results.push({ source, line: lineOf(content, m.index) })
       }
     }
 
-    if (!found) {
-      for (const m of content.matchAll(MDLINK_RE)) {
-        const target = decodeURIComponent(m[1]!.trim()).replace(/\.md$/, '')
-        if (target === noteStem || target.endsWith('/' + noteStem)) {
-          found = true
-          break
-        }
+    for (const m of content.matchAll(MDLINK_RE)) {
+      const target = decodeURIComponent(m[1]!.trim()).replace(/\.md$/, '')
+      if (target === noteStem || target.endsWith('/' + noteStem)) {
+        results.push({ source, line: lineOf(content, m.index) })
       }
     }
-
-    if (found) results.push({ source: file, sourceRelative: relative(vaultPath, file) })
   }
 
-  return results.sort((a, b) => a.sourceRelative.localeCompare(b.sourceRelative))
+  return results.sort((a, b) => a.source.localeCompare(b.source) || a.line - b.line)
 }

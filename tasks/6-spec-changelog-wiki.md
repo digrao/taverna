@@ -1,9 +1,9 @@
 ---
 id: 6-spec-changelog-wiki
-title: "Spec: changelog e wiki por versão"
-status: 🧠
+title: 'Spec: changelog e wiki por versão'
+status: "\U0001F3D6️"
 project: taverna
-progresso: 70
+progresso: 100
 ---
 
 Definir como o taverna mantém o CHANGELOG e propaga mudanças para a wiki a cada release.

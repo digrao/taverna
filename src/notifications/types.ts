@@ -1,11 +1,8 @@
-export interface NotificationMessage {
-  text: string
-  urgency?: 'info' | 'warning' | 'critical'
-  project?: string
-  agent?: string
-  sessionId?: string
+export interface TavernaEvent {
+  /** Namespaced: "core.task.moved", "<plugin-namespace>.<entity>.<action>" */
+  type: string
+  payload: unknown
+  timestamp: string
 }
 
-export interface Notifier {
-  send(message: NotificationMessage): Promise<void>
-}
+export type EventHandler = (event: TavernaEvent) => void | Promise<void>

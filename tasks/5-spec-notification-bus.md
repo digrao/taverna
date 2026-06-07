@@ -1,9 +1,9 @@
 ---
 id: 5-spec-notification-bus
-title: "Spec: bus de notificações"
-status: 🧠
+title: 'Spec: bus de notificações'
+status: "\U0001F3D6️"
 project: taverna
-progresso: 70
+progresso: 100
 ---
 
 Bus de eventos interno. O core publica eventos tipados; qualquer subscriber (SSE, Matrix, plugin) recebe e entrega no seu transport. Nenhum transport está no core.

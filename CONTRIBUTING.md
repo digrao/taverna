@@ -7,7 +7,7 @@ git clone https://github.com/digrao/taverna.git
 cd taverna
 npm install
 npm run build
-npm link          # makes `taverna` available globally
+npm link          # makes `taverna` available globally, pointing at dist/
 ```
 
 Verify:
@@ -16,166 +16,134 @@ Verify:
 npm run ci        # typecheck + lint + tests — must be green
 ```
 
-Set a test vault:
+Point it at a test vault — `taverna` locates its config first, and the
+config is what tells it where the vault is (never the other way around):
 
 ```bash
-export VAULT_PATH=$HOME/tmp-vault
-mkdir -p $VAULT_PATH/10_Projects $VAULT_PATH/60_Agents/1_Directives
-taverna session preview   # should return empty list
+mkdir -p ~/.config/taverna
+cat > ~/.config/taverna/config.json <<'EOF'
+{
+  "vaultPath": "/path/to/a/scratch/vault",
+  "projectsDir": "10_Projects",
+  "flowDir": "20_Areas/2_Fluxos",
+  "plugins": []
+}
+EOF
+
+taverna get_projects   # should return an empty list against a fresh vault
 ```
 
+See [INSTALL.md](INSTALL.md) for the full vault layout and how to author a
+flow canvas — you'll want at least a minimal `task.canvas`/`project.canvas`
+to exercise `move_task`/`move_project` while developing.
+
 ---
 
-## Project structure (frontmatter reference)
+## Project layout
 
-A project is a directory `10_Projects/<id>/` with a `README.md`:
-
-```markdown
----
-id: my-project
-tipo: "*"             # * | USP | BB
-priority: medium      # high | medium | low
-agent: "@dev-agent"
-run_every: daily      # never | daily | weekly | monthly
----
-
-Context the agent reads before starting work.
+```
+src/
+  core/            CommandDef/CommandRegistry/TavernaContext — the contract
+                   every command and protocol adapter is built on
+    flow/          canvas-driven flow engine (states, transitions, field
+                   resolution pipeline, template language)
+    vault-commands.ts, task-commands.ts   core command groups
+    index.ts       coreCommands — the populated registry every adapter reads from
+  vault/           reads/writes the Obsidian vault: frontmatter, projects,
+                   tasks, inbox, backlinks, scaffolding
+  notifications/   TavernaEvent + NotificationBus — internal pub/sub
+  plugin/          TavernaPlugin contract, namespace derivation, loader, scaffold
+  http/            HTTP adapter (REST-ish JSON API, SSE, MCP-over-SSE bridge)
+  mcp/             MCP adapter (tool generation from CommandDef)
+  config.ts        single-file bootstrap (~/.config/taverna/config.json)
+  cli.ts           CLI adapter — generates subcommands from the registry
 ```
 
-Tasks go in `10_Projects/<id>/tasks/<task-id>.md`:
+Every module that's more than a single file has its own `SPEC.md` documenting
+its contracts and invariants for evolution/maintenance — start there before
+changing how something works. [`SPEC.md`](SPEC.md) at the repo root is the
+index and the cross-cutting reference (naming convention, module map).
 
-```markdown
----
-prioridade: high      # high | medium | low
-progresso: 0          # 0–100
-deadline: 2026-06-15  # optional
-assignee: human       # optional — human | @agent-name
-depends_on:           # optional — blocks this task until deps reach 100%
-  - other-task-id
----
-
-# Task title
-
-Instructions for the agent.
-```
-
-`assignee: human` — the scheduler never dispatches an agent on this task;
-it appears in `taverna inbox` under **humanTasks**.
+**The core stays thin and protocol-agnostic.** If you're writing something
+that knows about HTTP/MCP/CLI specifics, it belongs in an adapter
+(`http/`, `mcp/`, `cli.ts`); if it knows about a *specific* vault's
+conventions (flow states, field names, integrations), it belongs in a
+plugin, not in `core/` — see [`SPEC.md`](SPEC.md)'s "specs stay abstract" note.
 
 ---
 
-## Community projects as git submodules
+## Adding a command
 
-Any public repo with a `README.md` in the project frontmatter format qualifies
-as a community project. To adopt one into your vault:
+Write a `CommandDef`:
 
-```bash
-cd my-vault
-git submodule add https://github.com/someone/my-project.git 10_Projects/my-project
+```ts
+interface CommandDef {
+  id: string
+  description: string
+  params?: JsonSchema          // plain JSON Schema — not Zod (see core/SPEC.md)
+  expose?: ('http' | 'mcp' | 'cli')[]   // omitted → all protocols; [] → none
+  handler: (params: Record<string, unknown>, ctx: TavernaContext) => Promise<unknown>
+}
 ```
 
-taverna detects the `.git` file (submodule pointer) automatically.
-To update all submodules: `taverna sync`.
-
-Minimum frontmatter for a community project `README.md`:
-
-```yaml
-id: my-project
-tipo: "*"
-priority: medium
-run_every: never
-```
-
-The `agent` field is intentionally omitted — consumers assign their own agent
-in their vault config (`agentDefaults` in `taverna.config.yaml`).
+push it into `coreCommands` (in `core/index.ts`, alongside the existing
+`vaultCommands`/`taskCommands`/`flowCommands` groups), and it is
+**automatically live on every protocol it's exposed to** — `GET|POST /api/<id>`,
+`taverna_<id>` over MCP, `taverna <id>` on the CLI. No adapter ever needs to
+be touched. See [`core/SPEC.md`](src/core/SPEC.md) for the full contract.
 
 ---
 
 ## Writing a plugin
 
-A plugin is any ES module that exports a `TavernaPlugin` as its default export.
+A plugin is any ES module whose **default export** is a `TavernaPlugin`.
 Scaffold one with:
 
 ```bash
-taverna create-plugin my-feature        # basic
-taverna create-plugin my-feature --cli  # with CLI entry point
+taverna create-plugin my-feature           # basic
+taverna create-plugin my-feature --with-cli   # with a CLI entry point
 ```
 
 ### Minimal plugin
 
 ```ts
-import type { TavernaPlugin } from 'taverna/plugin'
+import type { TavernaPlugin, PluginCommand, PluginContext } from 'taverna/plugin'
+import type { TavernaContext } from 'taverna/core'
+
+const commands: PluginCommand[] = [
+  {
+    id: 'ping',
+    description: 'Health check',
+    params: { type: 'object', properties: {} },
+    // expose omitted → published on http, mcp and cli:
+    //   GET  /api/my-feature/ping
+    //   MCP  taverna_my_feature_ping
+    //   CLI  taverna my-feature ping
+    handler: async (_params: Record<string, unknown>, _ctx: TavernaContext) => ({ ok: true }),
+  },
+]
 
 const plugin: TavernaPlugin = {
   name: 'taverna-my-feature',
-
-  features: [{
-    name: 'my_check',
-    description: 'Returns vault path',
-    params: {},
-    httpMethod: 'GET',
-    httpPath: '/api/my-feature/check',
-    handler: async (_, ctx) => ({ vault: ctx.vaultPath }),
-  }],
-}
-
-export default plugin
-```
-
-### Scheduling plugin — override scoring
-
-```ts
-import type { TavernaPlugin } from 'taverna/plugin'
-import type { ScoredProject } from 'taverna/pm'
-
-const plugin: TavernaPlugin = {
-  name: 'taverna-my-scorer',
-
-  scheduling: {
-    scoring: {
-      score(project, agentId, ctx) {
-        // custom scoring logic
-        return { project, agentId, score: 42, factors: [] }
-      },
-      rank(projects, agentDefaults, ctx) {
-        return projects
-          .map(p => this.score(p, agentDefaults[p.tipo] ?? '', ctx))
-          .sort((a, b) => b.score - a.score)
-      },
-    },
+  commands,
+  onLoad(_ctx: PluginContext) {
+    // subscribe to notifications, warm caches, etc.
   },
 }
 
 export default plugin
 ```
 
-Each scheduling slot (`scoring`, `triage`, `permissions`) is independent —
-omit the ones you don't need. The last loaded plugin wins per slot.
-
-### Lifecycle hooks
-
-```ts
-const plugin: TavernaPlugin = {
-  name: 'taverna-my-hooks',
-
-  onLoad(bus) {
-    bus.addSink({
-      name: 'my-sink',
-      send: async (msg) => { /* forward to slack, etc. */ },
-    })
-  },
-
-  async beforeTick(ctx) {
-    // called once before each scheduler scan — good for pre-sync work
-  },
-
-  async afterRun(result, project, ctx) {
-    // called after each agent run — good for telemetry or asset uploads
-  },
-}
-```
+`PluginCommand` is just `CommandDef` — a plugin command gets the exact same
+validation, error handling, and protocol exposure as a core command, for
+free. The plugin's **namespace** (derived from `name`: `"taverna-assets"` →
+`"assets"`, or set explicitly via `namespace`) prefixes every generated
+interface; the plugin itself never declares those forms.
 
 ### Raw HTTP routes (non-JSON content)
+
+For dashboards, rendered assets, or anything that doesn't fit the
+`{ data }`/`{ error }` JSON envelope:
 
 ```ts
 const plugin: TavernaPlugin = {
@@ -183,7 +151,7 @@ const plugin: TavernaPlugin = {
   httpRoutes: [{
     method: 'GET',
     path: '/my-ui',
-    handler: async (req, res) => {
+    handler: async (_req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/html' })
       res.end('<h1>hello</h1>')
     },
@@ -191,13 +159,37 @@ const plugin: TavernaPlugin = {
 }
 ```
 
-### Register the plugin
+### Registering the plugin
 
-```bash
-TAVERNA_PLUGINS=/path/to/dist/index.js taverna serve
-# or in ~/.config/taverna/.env:
-TAVERNA_PLUGINS=/path/to/dist/index.js
+Add it to `plugins` in `~/.config/taverna/config.json`:
+
+```json
+{
+  "vaultPath": "...",
+  "projectsDir": "...",
+  "flowDir": "...",
+  "plugins": [
+    { "path": "/absolute/path/to/taverna-my-feature/dist/index.js", "enabled": true }
+  ]
+}
 ```
+
+The loader is fail-safe: a plugin that fails to import or throws during
+`onLoad` is logged to stderr and skipped — it never crashes the core or
+prevents other plugins from loading. See
+[`plugin/SPEC.md`](src/plugin/SPEC.md) for the full contract.
+
+---
+
+## Writing flow canvases
+
+The canvas-driven flow engine has no hardcoded states — `task.canvas`,
+`project.canvas` (or any other flow you name) live entirely in the vault as
+configuration. If you're changing flow-engine code, you'll need a test flow
+to exercise it: see `tasks/0-guia-canvas.md` for the canonical walkthrough of
+how a `.canvas` + `nodes/<id>.md` pair becomes a state machine, and
+[`core/flow/SPEC.md`](src/core/flow/SPEC.md) for the engine's contract
+(resolution pipeline, template language, transitions).
 
 ---
 
@@ -212,21 +204,4 @@ npm run ci   # typecheck + lint + tests
 - No `--no-verify` bypasses
 - One logical change per commit
 - Commit message format: `<type>(<scope>): <summary>`
-  - Types: `feat`, `fix`, `chore`, `refactor`, `test`, `docs`, `ci`
-
----
-
-## Project layout
-
-```
-src/
-  commands/      single source of truth for all commands
-  infra/         HTTP server, MCP server, feature-map adapter
-  pm/
-    engine/      scheduler, executor, drain loop
-    observability/ budget, loki, active-runs
-    prompt/      prompt builder, snapshots
-    scheduling/  scoring, triage, policies, plugin interfaces
-  plugin/        loader, scaffold, types
-  vault/         frontmatter parsing, project/task/agent readers
-```
+  — types: `feat`, `fix`, `chore`, `refactor`, `test`, `docs`, `ci`, `spec`

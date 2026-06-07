@@ -2,9 +2,11 @@ services:
   taverna:
     build: .
     ports:
-      - "2948:2948"
+      - "3861:3861"
     volumes:
-      - ${VAULT_PATH:?Set VAULT_PATH to your vault path, e.g. export VAULT_PATH=$HOME/my-vault}:/vault:ro
-    environment:
-      - VAULT_PATH=/vault
+      # Edite os dois caminhos da esquerda para apontar para a sua vault e o
+      # seu config.json — taverna não usa variáveis de ambiente para isso
+      # (mesmo princípio do bootstrap por arquivo único, ver INSTALL.md).
+      - /caminho/absoluto/para/sua/vault:/vault:ro
+      - /caminho/absoluto/para/seu/config.json:/config/config.json:ro
     command: serve

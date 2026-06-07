@@ -1,5 +1,5 @@
 import matter from 'gray-matter'
-import type { Priority, RunEvery, RawFrontmatter } from './types.js'
+import type { RawFrontmatter } from './types.js'
 
 export function parseFrontmatter(rawContent: string): { data: RawFrontmatter; content: string } {
   const { data, content } = matter(rawContent)
@@ -30,40 +30,8 @@ export function getProgress(fm: RawFrontmatter): number {
   return 0
 }
 
-// Accepts English (high/medium/low) and Portuguese (alta/média/baixa)
-export function getPriority(fm: RawFrontmatter, key = 'priority'): Priority {
-  const v = fm[key] ?? fm['prioridade']
-  if (typeof v !== 'string') return 'medium'
-  const normalized = v.toLowerCase().trim()
-  if (normalized === 'high' || normalized === 'alta') return 'high'
-  if (normalized === 'low' || normalized === 'baixa') return 'low'
-  return 'medium'
-}
-
-export function getRunEvery(fm: RawFrontmatter): RunEvery {
-  const v = fm['run_every']
-  if (typeof v !== 'string') return 'never'
-  switch (v.toLowerCase().trim()) {
-    case 'hourly': return 'hourly'
-    case 'daily': return 'daily'
-    case 'weekly': return 'weekly'
-    case 'monthly': return 'monthly'
-    default: return 'never'
-  }
-}
-
 export function getStringArray(fm: RawFrontmatter, key: string): string[] {
   const v = fm[key]
   if (!Array.isArray(v)) return []
   return v.filter((x): x is string => typeof x === 'string')
-}
-
-// Reads nested pipeline.stage — gray-matter parses `pipeline:\n  stage: foo` as { pipeline: { stage: 'foo' } }
-export function getPipelineStage(fm: RawFrontmatter): string | undefined {
-  const p = fm['pipeline']
-  if (p && typeof p === 'object' && !Array.isArray(p)) {
-    const stage = (p as Record<string, unknown>)['stage']
-    if (typeof stage === 'string') return stage
-  }
-  return undefined
 }

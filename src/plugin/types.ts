@@ -1,54 +1,36 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { Command } from 'commander'
-import type { CommandDef, TavernaContext } from '../core/types.js'
+import type { CommandDef } from '../core/types.js'
 import type { NotificationBus } from '../notifications/bus.js'
-import type { AgentResult } from '../manager/engine/index.js'
-import type { VaultProject } from '../vault/types.js'
-import type { SchedulingPlugins } from '../manager/scheduling/plugins.js'
+import type { TavernaConfig } from '../config.js'
 
+/** Raw HTTP route for non-JSON content (dashboards, slides, assets) — path is free, no namespace. */
 export interface HttpRoute {
   method: 'GET' | 'POST'
-  /** Exact path or prefix ending with * (e.g. '/slides/*') */
   path: string
   handler: (req: IncomingMessage, res: ServerResponse, path: string) => Promise<void>
 }
 
+/** Same shape as a core CommandDef — registered under the plugin's namespace. */
+export type PluginCommand = CommandDef
+
+export interface PluginContext {
+  config: TavernaConfig
+  notificationBus: NotificationBus
+}
+
 /**
- * A taverna plugin contributes commands (HTTP + MCP), optional CLI commands,
- * and optional scheduler lifecycle hooks.
- *
- * Minimal plugin example:
- *
- *   export default {
- *     name: 'my-plugin',
- *     commands: [{
- *       id: 'ping', description: 'Health check', params: {},
- *       http: { method: 'GET', path: '/api/my-plugin/ping' },
- *       handler: async () => ({ ok: true }),
- *     }],
- *   } satisfies TavernaPlugin
+ * Contract a plugin implements to extend taverna. The namespace prefixes every
+ * generated interface (HTTP `/api/<namespace>/<id>`, CLI `taverna <namespace> <id>`,
+ * MCP `taverna_<namespace>_<id>`) — the plugin never declares these itself.
  */
 export interface TavernaPlugin {
+  /** Convention: "taverna-<namespace>" */
   name: string
+  /** Overrides the namespace derived from `name` */
+  namespace?: string
 
-  /** Commands exposed as MCP tools and HTTP routes (when http is set). */
-  commands?: CommandDef[]
-
-  /** Raw HTTP routes for serving non-JSON content (HTML, assets). */
+  commands?: PluginCommand[]
   httpRoutes?: HttpRoute[]
 
-  /** Called once when the plugin is loaded. Use to register notification sinks. */
-  onLoad?: (bus: NotificationBus) => void
-
-  /** Optional CLI commands this plugin contributes. */
-  registerCommands?: (program: Command, ctx: TavernaContext) => void
-
-  /** Called once at the start of each scheduler tick, before vault scan. */
-  beforeTick?: (ctx: TavernaContext) => Promise<void>
-
-  /** Called after each agent run completes (not called in dry-run mode). */
-  afterRun?: (result: AgentResult, project: VaultProject, ctx: TavernaContext) => Promise<void>
-
-  /** Override scoring, triage, or permission resolution for the scheduler. */
-  scheduling?: SchedulingPlugins
+  onLoad?: (ctx: PluginContext) => void
 }

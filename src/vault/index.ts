@@ -1,76 +1,19 @@
 import { join } from 'node:path'
-import { writeFile, mkdir } from 'node:fs/promises'
 import { scanProjects } from './project.js'
-import { discoverAgents } from './agent.js'
-import type { VaultProject, VaultState, VaultTask, Priority } from './types.js'
+import type { VaultProject } from './types.js'
 import type { TavernaConfig } from '../config.js'
 
-export { readProject, scanProjects, detectProjectType } from './project.js'
-export {
-  readProjectTasks,
-  progressToState,
-  isBlocked,
-  hasCycle,
-  resolveDependency,
-} from './task.js'
-export type { BlockedInfo } from './task.js'
-export { readAgent, discoverAgents } from './agent.js'
-export { readLogbook, appendLogbook, appendProjectLogbook } from './logbook.js'
+export { readProject, scanProjects } from './project.js'
+export { readProjectTasks } from './task.js'
+export { readInbox } from './inbox.js'
 export { findBacklinks } from './backlinks.js'
-export { updateProjectStatus, updateCompletedTaskSessionId } from './update.js'
-export type { ProjectStatusUpdate } from './update.js'
+export type { Backlink } from './backlinks.js'
+export { scaffoldProject } from './project-scaffold.js'
+export type { ProjectScaffoldResult } from './project-scaffold.js'
+export { writeTaskFile, slugify } from './task-scaffold.js'
+export type { TaskFileInput, TaskFileResult } from './task-scaffold.js'
 export type * from './types.js'
 
-/** Resolve vault path from VAULT_PATH env var. Throws if not set. */
-export function getVaultPath(): string {
-  const vaultPath = process.env['VAULT_PATH']
-  if (!vaultPath) throw new Error('VAULT_PATH environment variable is not set')
-  return vaultPath
-}
-
-/** Convenience wrapper — uses default config for a given vault path. */
-export async function scanVaultPath(vaultPath: string): Promise<VaultState> {
-  const { defineConfig } = await import('../config.js')
-  return scanVault(defineConfig({ vaultPath }))
-}
-
-export async function scanVault(config: TavernaConfig): Promise<VaultState> {
-  const projectsDir = join(config.vaultPath, config.projectsDir)
-  const directivesDir = join(config.vaultPath, config.directivesDir)
-
-  const [projects, agents] = await Promise.all([
-    scanProjects(projectsDir, config.uspFolderPrefixes),
-    discoverAgents(directivesDir),
-  ])
-
-  return {
-    projects,
-    agents,
-    scannedAt: new Date(),
-    vaultPath: config.vaultPath,
-  }
-}
-
-const PRIORITY_ORDER: Record<Priority, number> = { high: 0, medium: 1, low: 2 }
-
-export function sortByPriority(projects: VaultProject[]): VaultProject[] {
-  return [...projects].sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority])
-}
-
-export function filterByAgent(projects: VaultProject[], agentId: string): VaultProject[] {
-  return projects.filter((p) => p.agent === agentId)
-}
-
-export function getPendingTasks(project: VaultProject): VaultTask[] {
-  return project.tasks.filter((t) => t.state !== 'concluida')
-}
-
-export async function writeInbox(
-  content: string,
-  filename: string,
-  config: TavernaConfig,
-): Promise<void> {
-  const dir = join(config.vaultPath, config.morningOutputDir)
-  await mkdir(dir, { recursive: true })
-  await writeFile(join(dir, filename), content, 'utf8')
+export async function scanVault(config: TavernaConfig): Promise<VaultProject[]> {
+  return scanProjects(join(config.vaultPath, config.projectsDir))
 }

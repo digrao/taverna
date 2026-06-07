@@ -132,49 +132,31 @@ dist/
 
   await write(
     'src/index.ts',
-    `import type { TavernaPlugin } from 'taverna/plugin'
-import type { CommandDef, TavernaContext } from 'taverna/core'
-import type { NotificationBus } from 'taverna/notifications'
+    `import type { TavernaPlugin, PluginCommand, PluginContext } from 'taverna/plugin'
+import type { TavernaContext } from 'taverna/core'
 
-const commands: CommandDef[] = [
+const commands: PluginCommand[] = [
   {
-    id: '${baseName}_ping',
+    id: 'ping',
     description: 'Health check',
-    params: {},
-    http: { method: 'GET', path: '/api/${baseName}/ping' },
-    handler: async (_: Record<string, unknown>, ctx: TavernaContext) => {
-      return { ok: true, vault: ctx.vaultPath }
+    params: { type: 'object', properties: {} },
+    // expose omitido → publicado em http, mcp e cli:
+    //   GET  /api/${baseName}/ping
+    //   MCP  taverna_${baseName}_ping
+    //   CLI  taverna ${baseName} ping
+    handler: async (_params: Record<string, unknown>, _ctx: TavernaContext) => {
+      return { ok: true }
     },
   },
 ]
 
 const plugin: TavernaPlugin = {
   name: 'taverna-${baseName}',
-
-  // ── Commands (MCP tools + HTTP endpoints) ────────────────────────────
   commands,
 
-  // ── Notification sink (optional) ─────────────────────────────────────
-  onLoad(bus: NotificationBus) {
-    bus.addSink({
-      name: '${baseName}-sink',
-      send: async (_msg) => { /* TODO: forward notification */ },
-    })
+  onLoad(_ctx: PluginContext) {
+    // TODO: subscribe to notifications, warm caches, etc.
   },
-
-  // ── Scheduler hooks (optional) ───────────────────────────────────────
-  // scheduling: {
-  //   scoring: {
-  //     score(project, agentId, ctx) {
-  //       return { project, agentId, score: 0, factors: [] }
-  //     },
-  //     rank(projects, agentDefaults, ctx) {
-  //       return projects
-  //         .map(p => this.score(p, agentDefaults[p.tipo] ?? '', ctx))
-  //         .sort((a, b) => b.score - a.score)
-  //     },
-  //   },
-  // },
 }
 
 export default plugin

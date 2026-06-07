@@ -1,245 +1,173 @@
 #!/usr/bin/env node
 import { Command } from 'commander'
-import { join, dirname } from 'node:path'
+import { createInterface } from 'node:readline/promises'
 import { createRequire } from 'node:module'
-const _req = createRequire(import.meta.url)
-const { version: _version } = _req('../package.json') as { version: string }
-import { defineConfig, resolveVaultPath } from './config.js'
-import { executeRun, executeSessionRun, runWork } from './core/index.js'
-import { migrate } from './vault/migrate/index.js'
-import type { TavernaContext } from './core/types.js'
+import { join, dirname } from 'node:path'
+import { loadConfig } from './config.js'
+import { coreCommands } from './core/index.js'
+import type { JsonSchema, RegisteredCommand, TavernaContext } from './core/types.js'
+import { NotificationBus } from './notifications/index.js'
+import { loadPlugins } from './plugin/loader.js'
 
-function getVaultPath(opts: { vault?: string }): string {
+const _req = createRequire(import.meta.url)
+const { version } = _req('../package.json') as { version: string }
+
+/** Interactive prompter for fields the flow pipeline can't resolve on its own (e.g. `move_task`). */
+function cliPrompt(field: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout })
+  return rl.question(`${field}: `).finally(() => rl.close())
+}
+
+function buildContext(configPath: string | undefined): TavernaContext {
   try {
-    return resolveVaultPath(opts.vault)
+    return { config: loadConfig(configPath), notificationBus: new NotificationBus(), prompt: cliPrompt }
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e))
     process.exit(1)
   }
 }
 
-function buildContext(opts: { vault?: string; dryRun?: boolean }): TavernaContext {
-  const vaultPath = getVaultPath(opts)
-  const config = defineConfig({ vaultPath })
-  return { config, vaultPath, ...(opts.dryRun !== undefined ? { dryRun: opts.dryRun } : {}) }
+function extractConfigPath(argv: string[]): string | undefined {
+  const i = argv.indexOf('--config')
+  return i !== -1 ? argv[i + 1] : undefined
 }
 
-const program = new Command('taverna')
-  .description('Vault-first project orchestrator')
-  .version(_version)
+interface ParamEntry {
+  name: string
+  required: boolean
+  schema: JsonSchema
+}
 
-// ── run ───────────────────────────────────────────────────────────────────────
+/** Each `CommandDef.params` property becomes a `--<name>` flag — required ones via `requiredOption`. */
+function paramEntries(schema: JsonSchema | undefined): ParamEntry[] {
+  const properties = (schema?.['properties'] as Record<string, JsonSchema> | undefined) ?? {}
+  const required = new Set((schema?.['required'] as string[] | undefined) ?? [])
+  return Object.entries(properties).map(([name, propSchema]) => ({
+    name,
+    required: required.has(name),
+    schema: propSchema,
+  }))
+}
 
-program
-  .command('run [agent]')
-  .description('Run an agent on a project. Agent is auto-detected from frontmatter if omitted.')
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--project <id>', 'Project ID')
-  .option('--dry-run', 'Print the prompt without executing')
-  .option('--max-chars <n>', 'Max context chars', '8000')
-  .option('--timeout <ms>', 'Agent timeout in ms', '600000')
-  .option('--drain', 'Run tasks sequentially until done or --max-tasks is reached')
-  .option('--max-tasks <n>', 'Max tasks per drain session', '3')
-  .option('--pipeline', 'Run agents listed in project.pipeline frontmatter in sequence')
-  .action(
-    async (
-      agentId: string | undefined,
-      opts: {
-        vault?: string
-        project?: string
-        dryRun?: boolean
-        maxChars?: string
-        timeout?: string
-        drain?: boolean
-        maxTasks?: string
-        pipeline?: boolean
-      },
-    ) => {
-      const ctx = buildContext(opts)
-      try {
-        await executeRun(
-          {
-            ...(agentId !== undefined ? { agentId } : {}),
-            ...(opts.project !== undefined ? { projectId: opts.project } : {}),
-            ...(opts.drain !== undefined ? { drain: opts.drain } : {}),
-            maxTasks: Number(opts.maxTasks ?? 3),
-            ...(opts.pipeline !== undefined ? { pipeline: opts.pipeline } : {}),
-            ...(opts.maxChars ? { maxChars: Number(opts.maxChars) } : {}),
-            ...(opts.timeout ? { timeout: Number(opts.timeout) } : {}),
-          },
-          ctx,
-        )
-      } catch (e) {
-        console.error(e instanceof Error ? e.message : String(e))
-        process.exit(1)
-      }
-    },
-  )
+function coerce(value: string, schema: JsonSchema): unknown {
+  switch (schema['type']) {
+    case 'number':
+    case 'integer':
+      return Number(value)
+    case 'array':
+      return value
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    case 'boolean':
+      return value === 'true'
+    default:
+      return value
+  }
+}
 
-// ── session ───────────────────────────────────────────────────────────────────
+function registerCommand(target: Command, cmd: RegisteredCommand, ctx: TavernaContext): void {
+  const entries = paramEntries(cmd.params)
+  const sub = target.command(cmd.id).description(cmd.description)
 
-const sessionCmd = program
-  .command('session')
-  .description('Batch multiple tasks into a single agent session to maximize cache reuse')
+  for (const { name, required, schema } of entries) {
+    const flag = `--${name} <value>`
+    const description = typeof schema['description'] === 'string' ? schema['description'] : ''
+    if (required) sub.requiredOption(flag, description)
+    else sub.option(flag, description)
+  }
 
-sessionCmd
-  .command('run')
-  .description('Run a batched session of tasks for a project')
-  .requiredOption('--project <id>', 'Project ID')
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--tasks <ids>', 'Comma-separated task IDs (default: all unblocked pending)')
-  .option('--dry-run', 'Print the session prompt without executing')
-  .option('--max-chars <n>', 'Max context chars', '8000')
-  .option('--timeout <ms>', 'Agent timeout in ms', '600000')
-  .action(
-    async (opts: {
-      project: string
-      vault?: string
-      tasks?: string
-      dryRun?: boolean
-      maxChars?: string
-      timeout?: string
-    }) => {
-      const ctx = buildContext(opts)
-      try {
-        const result = await executeSessionRun(
-          {
-            projectId: opts.project,
-            ...(opts.tasks ? { taskIds: opts.tasks.split(',').map((s) => s.trim()) } : {}),
-            maxChars: Number(opts.maxChars ?? 8000),
-            timeout: Number(opts.timeout ?? 600_000),
-          },
-          ctx,
-        )
-        if (ctx.dryRun) {
-          console.log(result.output)
-          return
-        }
-        console.log(
-          result.success ? `  done (${result.durationMs}ms)` : `  failed: ${result.error}`,
-        )
-        if (result.resultado) console.log(`  RESULTADO: ${result.resultado}`)
-      } catch (e) {
-        console.error(e instanceof Error ? e.message : String(e))
-        process.exit(1)
-      }
-    },
-  )
-
-// ── work ─────────────────────────────────────────────────────────────────────
-// Called by systemd timers: taverna work [--drain] [--max-tasks N]
-
-program
-  .command('work')
-  .description('Dispatch agents on all eligible projects and exit (one-shot)')
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--dry-run', 'Print what would run without executing')
-  .option('--drain', 'Run tasks sequentially per project until done')
-  .option('--max-tasks <n>', 'Max tasks per project', '3')
-  .action(
-    async (opts: { vault?: string; dryRun?: boolean; drain?: boolean; maxTasks?: string }) => {
-      const ctx = buildContext(opts)
-      await runWork(
-        {
-          ...(opts.drain !== undefined ? { drain: opts.drain } : {}),
-          maxTasks: Number(opts.maxTasks ?? 3),
-        },
-        ctx,
-      )
-    },
-  )
-
-// ── migrate ───────────────────────────────────────────────────────────────────
-
-program
-  .command('migrate <archive-path>')
-  .description('Promote an archived project to 10_Projects using Claude Code to synthesize notes')
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--id <id>', 'Override the project ID (default: folder name)')
-  .option('--no-tasks', 'Skip task extraction — create only the project file')
-  .option('--dry-run', 'Print the Claude prompt without running or writing anything')
-  .action(
-    async (
-      archivePath: string,
-      opts: { vault?: string; id?: string; tasks?: boolean; dryRun?: boolean },
-    ) => {
-      const ctx = buildContext(opts)
-      const projectsDir = join(ctx.vaultPath, ctx.config.projectsDir)
-      const resolvedArchive = archivePath.startsWith('/')
-        ? archivePath
-        : join(ctx.vaultPath, archivePath)
-
-      console.log(`Scanning: ${resolvedArchive}`)
-      const { result, prompt } = await migrate(resolvedArchive, projectsDir, {
-        dryRun: opts.dryRun ?? false,
-        ...(opts.tasks === false ? { noTasks: true } : {}),
-        ...(opts.id !== undefined ? { overrideId: opts.id } : {}),
-      })
-
-      if (opts.dryRun) {
-        console.log('\n── Claude prompt that would be sent ──\n')
-        console.log(prompt)
-        console.log('\n── Would create ──')
-        console.log(`  project  ${result.projectPath}`)
-        return
-      }
-
-      console.log(`  created  ${result.projectPath}`)
-      for (const t of result.tasksCreated) {
-        console.log(`  task     ${t.replace(ctx.vaultPath + '/', '')}`)
-      }
-      console.log(`\nDone. ${result.tasksCreated.length} task(s) created.`)
-    },
-  )
-
-// ── serve ─────────────────────────────────────────────────────────────────────
-
-program
-  .command('serve')
-  .description('Start HTTP server (default port: 2948) — exposes JSON API for Grafana')
-  .option('--vault <path>', 'Vault path (or VAULT_PATH env var)')
-  .option('--port <n>', 'Port to listen on', '2948')
-  .action(async (opts: { vault?: string; port?: string }) => {
-    const { createServer } = await import('./http/server/index.js')
-    const ctx = buildContext(opts)
-    await createServer(ctx.config, { port: Number(opts.port ?? 2948) })
-  })
-
-// ── mcp ───────────────────────────────────────────────────────────────────────
-
-program
-  .command('mcp')
-  .description('Start MCP server (stdio) — exposes core commands as tools')
-  .action(async () => {
-    await import('./mcp/server.js')
-  })
-
-// ── create-plugin ─────────────────────────────────────────────────────────────
-
-program
-  .command('create-plugin <name>')
-  .description('Scaffold a new taverna plugin in ~/tools/taverna-<name>/')
-  .option(
-    '--dir <path>',
-    'Parent directory for the new plugin',
-    join(dirname(_req.resolve('../package.json')), '..'),
-  )
-  .option('--with-cli', 'Also scaffold a src/cli.ts entry point')
-  .action(async (name: string, opts: { dir: string; withCli?: boolean }) => {
-    const { scaffoldPlugin } = await import('./plugin/scaffold.js')
-    try {
-      const { pluginDir, files } = await scaffoldPlugin({
-        name,
-        targetDir: opts.dir,
-        withCli: opts.withCli,
-      })
-      console.log(`created ${pluginDir}`)
-      for (const f of files) console.log(`  ${f}`)
-      console.log(`\nnext steps:\n  cd ${pluginDir}\n  npm install\n  npm run build`)
-    } catch (e) {
-      console.error(e instanceof Error ? e.message : String(e))
-      process.exit(1)
+  sub.action(async (opts: Record<string, string | undefined>) => {
+    const params: Record<string, unknown> = {}
+    for (const { name, schema } of entries) {
+      const raw = opts[name]
+      if (raw !== undefined) params[name] = coerce(raw, schema)
     }
-  })
 
-program.parse()
+    const result = await coreCommands.execute(cmd.namespace, cmd.id, params, ctx)
+    if (result.error !== undefined) {
+      console.error(result.error)
+      process.exitCode = 1
+      return
+    }
+    console.log(JSON.stringify(result.data, null, 2))
+  })
+}
+
+async function main(): Promise<void> {
+  const ctx = buildContext(extractConfigPath(process.argv))
+  await loadPlugins(ctx.config, ctx.notificationBus)
+
+  const program = new Command('taverna')
+    .description('Vault-first project orchestrator — commands generated from the core registry')
+    .version(version)
+    .option('--config <path>', 'Path to the taverna config file (default: ~/.config/taverna/config.json)')
+
+  const commands = coreCommands.listFor('cli')
+  const byNamespace = new Map<string, RegisteredCommand[]>()
+  for (const cmd of commands) {
+    if (cmd.namespace === undefined) {
+      registerCommand(program, cmd, ctx)
+      continue
+    }
+    const list = byNamespace.get(cmd.namespace) ?? []
+    list.push(cmd)
+    byNamespace.set(cmd.namespace, list)
+  }
+
+  for (const [namespace, nsCommands] of byNamespace) {
+    const nsProgram = program.command(namespace).description(`${namespace} plugin commands`)
+    for (const cmd of nsCommands) registerCommand(nsProgram, cmd, ctx)
+  }
+
+  program
+    .command('serve')
+    .description('Start the persistent HTTP server (taverna serve)')
+    .option('--port <n>', 'Port to listen on (default: from config, or 3861)')
+    .action(async (opts: { port?: string }) => {
+      const { createServer } = await import('./http/server/index.js')
+      await createServer(ctx, opts.port !== undefined ? { port: Number(opts.port) } : {})
+    })
+
+  program
+    .command('mcp')
+    .description('Start the MCP server over stdio — exposes commands as taverna_<...> tools')
+    .action(async () => {
+      const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js')
+      const { createMcpServer } = await import('./mcp/server.js')
+      await createMcpServer(ctx).connect(new StdioServerTransport())
+    })
+
+  program
+    .command('create-plugin <name>')
+    .description('Scaffold a new taverna plugin in ~/tools/taverna-<name>/')
+    .option(
+      '--dir <path>',
+      'Parent directory for the new plugin',
+      join(dirname(_req.resolve('../package.json')), '..'),
+    )
+    .option('--with-cli', 'Also scaffold a src/cli.ts entry point')
+    .action(async (name: string, opts: { dir: string; withCli?: boolean }) => {
+      const { scaffoldPlugin } = await import('./plugin/scaffold.js')
+      try {
+        const { pluginDir, files } = await scaffoldPlugin({
+          name,
+          targetDir: opts.dir,
+          withCli: opts.withCli,
+        })
+        console.log(`created ${pluginDir}`)
+        for (const f of files) console.log(`  ${f}`)
+        console.log(`\nnext steps:\n  cd ${pluginDir}\n  npm install\n  npm run build`)
+      } catch (e) {
+        console.error(e instanceof Error ? e.message : String(e))
+        process.exitCode = 1
+      }
+    })
+
+  await program.parseAsync(process.argv)
+}
+
+main().catch((e) => {
+  console.error(e instanceof Error ? e.message : String(e))
+  process.exitCode = 1
+})

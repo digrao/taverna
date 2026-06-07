@@ -1,9 +1,9 @@
 ---
 id: 1-spec-core-commands
-title: "Spec: comandos core"
-status: 🧠
+title: 'Spec: comandos core'
+status: "\U0001F3D6️"
 project: taverna
-progresso: 50
+progresso: 100
 ---
 
 Todos os comandos que o core deve implementar, independente de protocolo.

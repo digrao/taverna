@@ -1,9 +1,9 @@
 ---
 id: 4-spec-protocols
-title: "Spec: adaptadores de protocolo (HTTP, MCP, CLI)"
-status: 🧠
+title: 'Spec: adaptadores de protocolo (HTTP, MCP, CLI)'
+status: "\U0001F3D6️"
 project: taverna
-progresso: 60
+progresso: 100
 ---
 
 Três modos de invocação independentes. Nenhum adaptador contém lógica de negócio.

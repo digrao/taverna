@@ -1,54 +1,58 @@
-import type { TavernaPlugin } from './types.js'
-import { notificationBus } from '../notifications/bus.js'
+import { coreCommands } from '../core/index.js'
+import type { TavernaConfig } from '../config.js'
+import type { NotificationBus } from '../notifications/bus.js'
+import type { HttpRoute, TavernaPlugin } from './types.js'
+
+/** "taverna-assets" → "assets"; an explicit `namespace` always wins. */
+export function deriveNamespace(plugin: TavernaPlugin): string {
+  if (plugin.namespace !== undefined) return plugin.namespace
+  return plugin.name.startsWith('taverna-') ? plugin.name.slice('taverna-'.length) : plugin.name
+}
+
+export interface LoadedPlugins {
+  plugins: TavernaPlugin[]
+  httpRoutes: HttpRoute[]
+}
 
 /**
- * Discovers and loads plugins from TAVERNA_PLUGINS env var.
- *
- * TAVERNA_PLUGINS is a colon-separated list of absolute paths to plugin entry points:
- *   TAVERNA_PLUGINS=/home/user/tools/taverna-assets/dist/index.js:/home/user/tools/taverna-blog/dist/index.js
- *
- * Each entry point must export a default TavernaPlugin object.
- * Plugins that fail to load are logged and skipped — they never crash taverna.
+ * Loads plugins declared in `config.plugins`, registers their commands into the
+ * core registry under the derived namespace, and collects their raw HTTP routes.
+ * Plugins that fail to load (or lack a default export with `name`) are logged
+ * and skipped — they never crash the core.
  */
-export async function loadPlugins(): Promise<TavernaPlugin[]> {
-  const pluginPaths = (process.env['TAVERNA_PLUGINS'] ?? '')
-    .split(':')
-    .map((p) => p.trim())
-    .filter(Boolean)
-
-  if (pluginPaths.length === 0) return []
-
+export async function loadPlugins(
+  config: TavernaConfig,
+  notificationBus: NotificationBus,
+): Promise<LoadedPlugins> {
   const plugins: TavernaPlugin[] = []
+  const httpRoutes: HttpRoute[] = []
 
-  for (const pluginPath of pluginPaths) {
+  for (const entry of config.plugins) {
+    if (!entry.enabled) continue
+
     try {
-      const mod = await import(pluginPath)
+      const mod = await import(entry.path)
       const plugin = mod.default as TavernaPlugin
       if (!plugin?.name) {
-        process.stderr.write(`[plugin] ${pluginPath}: missing default export with name field\n`)
+        process.stderr.write(`[plugin] ${entry.path}: missing default export with "name"\n`)
         continue
       }
-      plugin.onLoad?.(notificationBus)
+
+      const namespace = deriveNamespace(plugin)
+      for (const command of plugin.commands ?? []) {
+        coreCommands.register(command, namespace)
+      }
+      httpRoutes.push(...(plugin.httpRoutes ?? []))
+
+      plugin.onLoad?.({ config, notificationBus })
       plugins.push(plugin)
-      process.stderr.write(`[plugin] loaded: ${plugin.name}\n`)
+      process.stderr.write(`[plugin] loaded: ${plugin.name} (namespace: ${namespace})\n`)
     } catch (e) {
       process.stderr.write(
-        `[plugin] failed to load ${pluginPath}: ${e instanceof Error ? e.message : String(e)}\n`,
+        `[plugin] failed to load ${entry.path}: ${e instanceof Error ? e.message : String(e)}\n`,
       )
     }
   }
 
-  return plugins
-}
-
-export function collectPluginCommands(plugins: TavernaPlugin[]) {
-  return plugins.flatMap((p) => p.commands ?? [])
-}
-
-export function collectPluginRoutes(plugins: TavernaPlugin[]) {
-  return plugins.flatMap((p) => p.httpRoutes ?? [])
-}
-
-export async function loadPluginCommands() {
-  return collectPluginCommands(await loadPlugins())
+  return { plugins, httpRoutes }
 }

@@ -1,63 +1,87 @@
-import type { z } from 'zod'
+import { Ajv } from 'ajv'
 import type { TavernaConfig } from '../config.js'
 import type { NotificationBus } from '../notifications/bus.js'
-import type { VaultState } from '../vault/types.js'
+
+const ajv = new Ajv({ allErrors: true, strict: false })
 
 export interface TavernaContext {
   config: TavernaConfig
-  vaultPath: string
-  dryRun?: boolean
-  notificationBus?: NotificationBus
-  scan?: () => Promise<VaultState>
+  notificationBus: NotificationBus
+  /** Optional interactive prompter for fields the flow pipeline can't resolve on its own (CLI-only, typically) */
+  prompt?: (field: string) => Promise<string>
 }
 
-export type ZodRawShape = Record<string, z.ZodTypeAny>
+/** JSON Schema describing a command's params — not a Zod shape. */
+export type JsonSchema = Record<string, unknown>
+
+export type Protocol = 'http' | 'mcp' | 'cli'
 
 export interface CommandDef {
   id: string
   description: string
-  params?: ZodRawShape
+  params?: JsonSchema
+  /** Protocols this command is published on. Omit for all three; [] to publish on none. */
+  expose?: Protocol[]
   handler: (params: Record<string, unknown>, ctx: TavernaContext) => Promise<unknown>
-  /** Expose via HTTP and MCP. Omit for CLI-only commands. */
-  http?: { method: 'GET' | 'POST'; path: string }
+}
+
+/** A command as known to the registry — carries the namespace it was registered under, if any. */
+export interface RegisteredCommand extends CommandDef {
+  namespace?: string
 }
 
 export interface CommandResult<T = unknown> {
-  success: boolean
   data?: T
   error?: string
-  metadata?: { durationMs?: number; itemsProcessed?: number }
+}
+
+function isExposedOn(cmd: CommandDef, protocol: Protocol): boolean {
+  return cmd.expose === undefined || cmd.expose.includes(protocol)
 }
 
 export class CommandRegistry {
-  private commands = new Map<string, CommandDef>()
+  private commands: RegisteredCommand[] = []
 
-  register(def: CommandDef): void {
-    this.commands.set(def.id, def)
+  /** Registers a command. Core commands omit `namespace`; plugin commands provide it. */
+  register(def: CommandDef, namespace?: string): void {
+    this.commands.push(namespace !== undefined ? { ...def, namespace } : { ...def })
   }
 
-  get(id: string): CommandDef | undefined {
-    return this.commands.get(id)
+  find(namespace: string | undefined, id: string): RegisteredCommand | undefined {
+    return this.commands.find((c) => c.namespace === namespace && c.id === id)
   }
 
-  list(): CommandDef[] {
-    return Array.from(this.commands.values())
+  list(): RegisteredCommand[] {
+    return [...this.commands]
   }
 
-  async execute<T = unknown>(
+  listFor(protocol: Protocol): RegisteredCommand[] {
+    return this.commands.filter((c) => isExposedOn(c, protocol))
+  }
+
+  async execute(
+    namespace: string | undefined,
     id: string,
-    args: Record<string, unknown>,
+    params: Record<string, unknown>,
     ctx: TavernaContext,
-  ): Promise<CommandResult<T>> {
-    const cmd = this.get(id)
-    if (!cmd) return { success: false, error: `Command not found: ${id}` }
+  ): Promise<CommandResult> {
+    const cmd = this.find(namespace, id)
+    if (!cmd) {
+      const fullId = namespace ? `${namespace}.${id}` : id
+      return { error: `Command not found: ${fullId}` }
+    }
+
+    if (cmd.params) {
+      const validate = ajv.compile(cmd.params)
+      if (!validate(params)) {
+        return { error: ajv.errorsText(validate.errors) }
+      }
+    }
+
     try {
-      const startMs = Date.now()
-      const result = (await cmd.handler(args, ctx)) as CommandResult<T>
-      result.metadata = { ...result.metadata, durationMs: Date.now() - startMs }
-      return result
+      return { data: await cmd.handler(params, ctx) }
     } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) }
+      return { error: err instanceof Error ? err.message : String(err) }
     }
   }
 }

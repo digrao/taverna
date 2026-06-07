@@ -1,9 +1,9 @@
 ---
 id: 3-spec-config
-title: "Spec: configuração"
-status: 🧠
+title: 'Spec: configuração'
+status: "\U0001F3D6️"
 project: taverna
-progresso: 60
+progresso: 100
 ---
 
 SST: o arquivo de configuração é a única fonte de verdade. A vault é conteúdo; o config é infraestrutura — ele não mora dentro da vault, mora junto do próprio taverna (instalação/repositório), versionável independente de qualquer vault específica.

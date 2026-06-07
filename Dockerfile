@@ -19,9 +19,9 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/node_modules ./node_modules
 COPY package.json ./
 
-ENV VAULT_PATH=/vault
+# Vault e config são montados em runtime — a imagem nunca contém dados do usuário.
+# vaultPath dentro do config.json montado deve apontar para /vault.
+EXPOSE 3861
 
-EXPOSE 2948
-
-ENTRYPOINT ["node", "dist/cli.js"]
-CMD ["--help"]
+ENTRYPOINT ["node", "dist/cli.js", "--config", "/config/config.json"]
+CMD ["serve"]
