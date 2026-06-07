@@ -6,17 +6,19 @@ project: taverna
 progresso: 60
 ---
 
-SST: o arquivo de configuração é a única fonte de verdade. Sem env vars de config — apenas `--vault` como bootstrap mínimo para localizar o arquivo.
+SST: o arquivo de configuração é a única fonte de verdade. A vault é conteúdo; o config é infraestrutura — ele não mora dentro da vault, mora junto do próprio taverna (instalação/repositório), versionável independente de qualquer vault específica.
 
 ---
 
 ## Bootstrap
 
-O único valor externo ao config é o caminho da vault, passado via:
-1. `--vault <path>` na CLI
-2. `VAULT_PATH` como fallback de ambiente (apenas para vault path)
+O config é localizado primeiro — é ele quem informa onde está a vault, nunca o contrário.
 
-Localizado o vault, o taverna lê `{vaultPath}/taverna.config.json`. Tudo mais vem dali.
+Ordem de resolução do caminho do config:
+1. `--config <path>` na CLI
+2. Caminho fixo padrão (ex.: `~/.config/taverna/config.json`)
+
+Localizado o config, o taverna o lê. Um dos campos do schema do core é `vaultPath` — o caminho absoluto da vault que essa instância do taverna opera. Não há `--vault` nem `VAULT_PATH`: a vault é configuração, não bootstrap.
 
 ---
 
@@ -24,6 +26,9 @@ Localizado o vault, o taverna lê `{vaultPath}/taverna.config.json`. Tudo mais v
 
 ```jsonc
 {
+  // Caminho absoluto da vault que esta instância opera
+  "vaultPath": "/home/user/notas",
+
   // Diretório dos projetos, relativo ao vaultPath
   "projectsDir": "10_Projects",
 
@@ -54,9 +59,10 @@ Cada plugin declara seu próprio schema sob seu namespace. O taverna passa `conf
 
 ```jsonc
 {
+  "vaultPath": "/home/user/notas",
   "projectsDir": "10_Projects",
   "flowDir": "20_Areas/2_Fluxos",
-  "port": 2948,
+  "port": 3861,
   "plugins": [...],
 
   // config do plugin taverna-assets (namespace: "assets")
