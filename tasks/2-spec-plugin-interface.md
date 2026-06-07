@@ -7,7 +7,25 @@ progresso: 50
 ---
 
 Contrato que um plugin deve implementar para estender o taverna.
-Plugins são carregados via `TAVERNA_PLUGINS` (lista de caminhos separada por `:`).
+
+## Descoberta de plugins
+
+Plugins são declarados no arquivo de configuração do taverna (ver task 3):
+
+```json
+{
+  "plugins": [
+    { "path": "/home/user/tools/taverna-assets/dist/index.js", "enabled": true },
+    { "path": "/home/user/tools/taverna-gui/dist/index.js",    "enabled": true }
+  ]
+}
+```
+
+- `path` — caminho absoluto para o entry point compilado do plugin
+- `enabled` — permite desativar sem remover da lista (gerenciável pelo `taverna-gui`)
+
+`TAVERNA_PLUGINS` (lista de caminhos separada por `:`) ainda é suportado como override de ambiente, mas o arquivo de config é a fonte de verdade. Isso permite que plugins como o `taverna-gui` alterem a lista de plugins ativos em runtime sem edição manual.
+
 Cada entry point exporta um objeto default que satisfaz `TavernaPlugin`.
 Plugins que falham no carregamento são logados e ignorados — nunca derrubam o taverna.
 
