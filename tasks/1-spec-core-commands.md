@@ -14,37 +14,6 @@ Params marcados com `*` são obrigatórios.
 
 ---
 
-## Grupo: monitoramento
-
-Consumidos pelo dashboard e Grafana. Todos leitura pura.
-
-### `get_state`
-Retorna o estado consolidado da vault: projetos ativos, tarefas pendentes, agentes disponíveis.
-- params: nenhum
-- retorna: `{ projects: Project[], tasks: Task[], agents: Agent[] }`
-
-### `get_costs`
-Retorna o consumo de tokens acumulado por projeto.
-- params: nenhum
-- retorna: `{ items: { projectId, tokens, estimatedCost }[] }`
-
-### `get_budget`
-Retorna o orçamento configurado e quanto já foi consumido.
-- params: nenhum
-- retorna: `{ limit, used, remaining, unit: 'tokens' | 'usd' }`
-
-### `get_active`
-Retorna os agentes em execução no momento.
-- params: nenhum
-- retorna: `{ runs: { projectId, agentId, startedAt, pid }[] }`
-
-### `get_recent_runs`
-Retorna o histórico das últimas execuções.
-- params: `limit` (number, default 20)
-- retorna: `{ runs: { projectId, agentId, startedAt, durationMs, success, resultado? }[] }`
-
----
-
 ## Grupo: vault
 
 Leitura da vault. Não disparam agentes.
@@ -59,11 +28,6 @@ Retorna um projeto específico com suas tasks.
 - params: `id*` (string)
 - retorna: `{ project: Project, tasks: Task[] }`
 
-### `get_agents`
-Lista as diretivas de agentes disponíveis.
-- params: nenhum
-- retorna: `{ agents: Agent[] }`
-
 ### `get_inbox`
 Retorna os itens da inbox da vault.
 - params: nenhum
@@ -73,32 +37,6 @@ Retorna os itens da inbox da vault.
 Retorna as referências wikilink para um arquivo.
 - params: `file*` (string, caminho relativo à vault)
 - retorna: `{ backlinks: { source, line }[] }`
-
-### `preview_sessions`
-Mostra o que seria despachado se `run_work` fosse chamado agora.
-- params: nenhum
-- retorna: `{ sessions: { projectId, agentId, tasks: Task[] }[] }`
-
----
-
-## Grupo: execução
-
-Disparam agentes. Efeitos colaterais.
-
-### `run`
-Executa um agente em um projeto. Agente é inferido do frontmatter se omitido.
-- params: `projectId*`, `agentId?`, `dryRun?` (bool), `maxChars?` (number), `timeout?` (ms), `drain?` (bool), `maxTasks?` (number)
-- retorna: `{ success, durationMs, resultado? }`
-
-### `session_run`
-Agrupa múltiplas tasks em uma única sessão de agente (maximiza cache).
-- params: `projectId*`, `taskIds?` (string[]), `dryRun?`, `maxChars?`, `timeout?`
-- retorna: `{ success, durationMs, resultado? }`
-
-### `run_work`
-Despacha agentes em todos os projetos elegíveis e encerra (one-shot, usado pelo systemd).
-- params: `dryRun?`, `drain?`, `maxTasks?`
-- retorna: `{ dispatched: { projectId, agentId }[], skipped: string[] }`
 
 ---
 
@@ -117,13 +55,13 @@ Move uma task concluída para o arquivo.
 - retorna: `{ archivedTo: string }`
 
 ### `add_task`
-Cria uma nova task em um projeto.
-- params: `projectId*`, `title*`, `body?`, `progresso?` (0–100), `depende?` (string[])
+Cria uma nova task em um projeto. `title` é inferido pelo pipeline do canvas se omitido.
+- params: `projectId*`, `title?`, `body?`, `progresso?` (0–100), `depende?` (string[])
 - retorna: `{ taskId, path }`
 
 ### `create_project`
 Cria a estrutura de pastas de um novo projeto na vault.
-- params: `id*`, `agent?`, `tipo?`, `priority?`
+- params: `id*`
 - retorna: `{ projectPath }`
 
 ---
@@ -158,8 +96,8 @@ Avança ou recua uma task no fluxo, resolvendo campos pelo pipeline antes de tra
 
 ### `move_project`
 Avança (ou recua) um projeto no fluxo de projetos, com a mesma validação de campos obrigatórios.
-- params: `projectId*`, `to*` (emoji do estado destino)
-- retorna: `{ previous, current, missing?: string[] }`
+- params: `projectId*`, `to*` (identificador do estado destino)
+- retorna: `{ previous, current, prompted?: Record<string,string> }`
 
 ### `get_flow_state`
 Retorna o estado atual e os próximos estados possíveis de um item, consultando o canvas.
@@ -170,6 +108,9 @@ Retorna o estado atual e os próximos estados possíveis de um item, consultando
 
 ## O que NÃO é comando core
 
+- `run`, `session_run`, `run_work` — execução de agentes → `taverna-claude-code`
+- `get_active`, `get_recent_runs`, `get_costs`, `get_budget` — monitoramento de runs → `taverna-claude-code`
+- `get_agents` — diretivas de agentes → `taverna-claude-code`
 - `serve` — infraestrutura HTTP (task 4)
 - `mcp` — infraestrutura MCP (task 4)
 - `create_plugin` — ferramenta de desenvolvimento
