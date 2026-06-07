@@ -22,7 +22,6 @@ Declarados no arquivo de configuração (ver task 3):
 }
 ```
 
-`TAVERNA_PLUGINS` (`:` separado) é suportado como override de ambiente.
 Plugins que falham no carregamento são logados e ignorados — nunca derrubam o core.
 
 ---
