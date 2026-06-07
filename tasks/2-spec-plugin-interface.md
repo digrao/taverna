@@ -3,31 +3,46 @@ id: 2-spec-plugin-interface
 title: "Spec: interface de plugins"
 status: 🧠
 project: taverna
-progresso: 50
+progresso: 80
 ---
 
 Contrato que um plugin deve implementar para estender o taverna.
 
+---
+
 ## Descoberta de plugins
 
-Plugins são declarados no arquivo de configuração do taverna (ver task 3):
+Declarados no arquivo de configuração (ver task 3):
 
 ```json
 {
   "plugins": [
-    { "path": "/home/user/tools/taverna-assets/dist/index.js", "enabled": true },
-    { "path": "/home/user/tools/taverna-gui/dist/index.js",    "enabled": true }
+    { "path": "/home/user/tools/taverna-assets/dist/index.js", "enabled": true }
   ]
 }
 ```
 
-- `path` — caminho absoluto para o entry point compilado do plugin
-- `enabled` — permite desativar sem remover da lista (gerenciável pelo `taverna-gui`)
+`TAVERNA_PLUGINS` (`:` separado) é suportado como override de ambiente.
+Plugins que falham no carregamento são logados e ignorados — nunca derrubam o core.
 
-`TAVERNA_PLUGINS` (lista de caminhos separada por `:`) ainda é suportado como override de ambiente, mas o arquivo de config é a fonte de verdade. Isso permite que plugins como o `taverna-gui` alterem a lista de plugins ativos em runtime sem edição manual.
+---
 
-Cada entry point exporta um objeto default que satisfaz `TavernaPlugin`.
-Plugins que falham no carregamento são logados e ignorados — nunca derrubam o taverna.
+## Namespace
+
+O namespace do plugin é derivado automaticamente do `name`:
+
+```
+"taverna-assets"  →  namespace: "assets"
+"taverna-gui"     →  namespace: "gui"
+```
+
+O plugin pode sobrescrever com `namespace` explícito. O namespace prefixia todas as interfaces:
+
+| Protocolo | Formato |
+|---|---|
+| HTTP | `GET /api/<namespace>/<command-id>` |
+| CLI  | `taverna <namespace> <command-id>` |
+| MCP  | `taverna_<namespace>_<command-id>` |
 
 ---
 
@@ -35,55 +50,44 @@ Plugins que falham no carregamento são logados e ignorados — nunca derrubam o
 
 ```ts
 interface TavernaPlugin {
-  name: string          // identificador único, ex: "taverna-assets"
+  name:       string        // convenção: "taverna-<namespace>"
+  namespace?: string        // sobrescreve o namespace derivado do name
 
-  commands?:    CommandDef[]   // comandos core adicionais (expostos via HTTP e MCP)
-  httpRoutes?:  HttpRoute[]    // rotas HTTP brutas para conteúdo não-JSON (HTML, assets)
-  cliCommands?: CliDef[]       // subcomandos CLI adicionais
+  commands?:    PluginCommand[]  // handlers registrados no core
+  httpRoutes?:  HttpRoute[]      // rotas brutas (HTML, assets, SSE — sem namespace automático)
 
-  onLoad?: (ctx: PluginContext) => void  // chamado uma vez ao carregar
+  onLoad?: (ctx: PluginContext) => void
 }
 ```
 
-### `CommandDef`
-
-Idêntico ao da task 1 — mesmo contrato do core. Plugins adicionam comandos como se fossem nativos.
+### `PluginCommand`
 
 ```ts
-interface CommandDef {
+interface PluginCommand {
   id:          string
   description: string
-  params?:     Schema        // subconjunto de Zod ou JSON Schema
-  http?:       { method: 'GET' | 'POST', path: string }
-  handler:     (params, ctx: TavernaContext) => Promise<unknown>
+  params?:     JsonSchema   // JSON Schema — não Zod diretamente
+  expose?:     ('http' | 'mcp' | 'cli')[]  // default: todos os protocolos; [] para não expor
+  handler:     (params: Record<string, unknown>, ctx: TavernaContext) => Promise<unknown>
 }
 ```
+
+- Se `expose` for omitido, o comando é publicado em todos os protocolos. Para não expor, declare `expose: []` explicitamente.
+- O path HTTP, o subcomando CLI e o nome MCP são gerados pelo adaptador a partir do namespace + id — o plugin não define rotas manualmente.
 
 ### `HttpRoute`
 
-Para conteúdo que não é JSON — dashboards, slides, assets estáticos.
+Para conteúdo que não é JSON — dashboards, slides, assets. Path é livre (sem namespace forçado).
 
 ```ts
 interface HttpRoute {
   method:  'GET' | 'POST'
-  path:    string            // exato ou prefixo terminando em * (ex: '/slides/*')
-  handler: (req, res, path) => Promise<void>
-}
-```
-
-### `CliDef`
-
-Subcomando CLI registrado no `program` raiz do taverna.
-
-```ts
-interface CliDef {
-  register: (program: Command, ctx: TavernaContext) => void
+  path:    string
+  handler: (req, res, path: string) => Promise<void>
 }
 ```
 
 ### `PluginContext`
-
-Contexto disponível no `onLoad` — acesso ao bus de notificações e config.
 
 ```ts
 interface PluginContext {
@@ -94,24 +98,37 @@ interface PluginContext {
 
 ---
 
-## O que NÃO é responsabilidade do plugin core
-
-- Hooks de execução (`afterRun`, `beforeTick`) → `taverna-claude-code`
-- Override de scheduling e scoring → `taverna-claude-code`
-- Fluxos e nodes do canvas → configuração do usuário, não plugin
-
----
-
-## Exemplo mínimo
+## Exemplo
 
 ```ts
 export default {
-  name: 'taverna-ping',
-  commands: [{
-    id: 'ping',
-    description: 'Health check',
-    http: { method: 'GET', path: '/api/ping' },
-    handler: async () => ({ ok: true }),
-  }],
+  name: 'taverna-assets',
+  commands: [
+    {
+      id: 'list',
+      description: 'Lista assets de um projeto',
+      params: { projectId: { type: 'string' } },
+      handler: async ({ projectId }, ctx) => listAssets(projectId, ctx),
+      // expose omitido → publicado em http, mcp e cli
+    },
+    {
+      id: 'sync',
+      description: 'Sincroniza assets (interno)',
+      expose: [],
+      handler: async (_, ctx) => syncAssets(ctx),
+    },
+  ],
 } satisfies TavernaPlugin
+
+// Resultado:
+//   GET  /api/assets/list
+//   MCP  taverna_assets_list
+//   CLI  taverna assets list
 ```
+
+---
+
+## O que NÃO é responsabilidade da interface core
+
+- Hooks de execução (`afterRun`, `beforeTick`, scheduling) → `taverna-claude-code`
+- Fluxos e nodes do canvas → configuração do usuário
