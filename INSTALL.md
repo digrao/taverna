@@ -8,7 +8,8 @@
 
 ## 1. Instalação
 
-### Via npm (recomendado para uso normal)
+### (FUTURO) Via npm (recomendado para uso normal)
+> Ainda não está publicado no registry...
 
 ```bash
 npm install -g taverna
@@ -22,7 +23,7 @@ git clone https://github.com/digrao/taverna.git
 cd taverna
 npm install
 npm run build
-npm link          # disponibiliza `taverna` globalmente, apontando para dist/
+sudo npm link          # disponibiliza `taverna` globalmente, apontando para dist/
 ```
 
 ### Via Docker
@@ -38,7 +39,10 @@ onde está a vault, nunca o contrário. Por padrão, ele procura em
 
 ```bash
 mkdir -p ~/.config/taverna
-cat > ~/.config/taverna/config.json <<'EOF'
+```
+
+`~/.config/taverna/config.json`
+```json
 {
   "vaultPath": "/caminho/absoluto/para/sua/vault",
   "projectsDir": "10_Projects",
@@ -46,16 +50,15 @@ cat > ~/.config/taverna/config.json <<'EOF'
   "port": 3861,
   "plugins": []
 }
-EOF
 ```
 
-| Campo | Obrigatório | Descrição |
-|---|---|---|
-| `vaultPath` | sim | Caminho absoluto para a raiz da vault |
-| `projectsDir` | sim | Pasta de projetos, relativa a `vaultPath` |
-| `flowDir` | sim | Pasta com os canvases de fluxo e seus schemas de nó |
-| `port` | não | Porta do servidor HTTP (`taverna serve`) — padrão `3861` |
-| `plugins` | não | Lista de `{ "path": "...", "enabled": true }` — veja [CONTRIBUTING.md](CONTRIBUTING.md#escrevendo-um-plugin) |
+| Campo         | Obrigatório | Descrição                                                                                                    |
+| ------------- | ----------- | ------------------------------------------------------------------------------------------------------------ |
+| `vaultPath`   | sim         | Caminho absoluto para a raiz da vault                                                                        |
+| `projectsDir` | sim         | Pasta de projetos, relativa a `vaultPath`                                                                    |
+| `flowDir`     | sim         | Pasta com os canvases de fluxo e seus schemas de nó                                                          |
+| `port`        | não         | Porta do servidor HTTP (`taverna serve`) — padrão `3861`                                                     |
+| `plugins`     | não         | Lista de `{ "path": "...", "enabled": true }` — veja [CONTRIBUTING.md](CONTRIBUTING.md#escrevendo-um-plugin) |
 
 ## 3. Estrutura esperada da vault
 
