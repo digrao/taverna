@@ -1,9 +1,3 @@
----
-id: taverna
-status: "🪴"
-agent: '[[dev-agent]]'
----
-
 # taverna
 
 > *Vontade é a condição necessária e suficiente para fazer a realidade.*
@@ -82,3 +76,7 @@ taverna mcp                                   # MCP via stdio — tool taverna_g
 ## Licença
 
 [MIT](LICENSE) © João Victor Cavalcante Miranda
+
+## Comunidade
+
+![Matrix](https://img.shields.io/matrix/taverna:matrix.jvcm.com.br?logo=matrix)
