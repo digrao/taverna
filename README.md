@@ -80,3 +80,6 @@ taverna mcp                                   # MCP via stdio — tool taverna_g
 ## Comunidade
 
 ![Matrix](https://img.shields.io/matrix/taverna:matrix.jvcm.com.br?logo=matrix)
+
+Se off, talvez alguém tenha tropeçado em algum fio aqui...
+(Se tem aviso, tem história)
