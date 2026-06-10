@@ -79,7 +79,7 @@ taverna mcp                                   # MCP via stdio — tool taverna_g
 
 ## Comunidade
 
-![Matrix](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fmatrix.jvcm.com.br%2F_matrix%2Fclient%2Fv3%2Fdirectory%2Froom%2F%2523taverna%3Amatrix.jvcm.com.br&query=%24.room_id&label=Matrix%20Room%20ID&color=0dbd8b&logo=matrix)
+![Matrix](https://img.shields.io/matrix/taverna:matrix.jvcm.com.br?logo=matrix)
 
 Se off, talvez alguém tenha tropeçado em algum fio aqui...
 (Se tem aviso, tem história)
